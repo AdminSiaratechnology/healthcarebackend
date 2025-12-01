@@ -17,12 +17,19 @@ from app.schemas.auth import (
     GoogleAuthSetupRequest,
     GoogleAuthSetupResponse,
     GoogleAuthVerifyRequest,
+    ChangePasswordRequest,
+    ForgotMPINSetRequest,
+    ForgotPasswordRequest,
+    ForgotPasswordVerifyRequest,
+    ForgotPasswordResetRequest,
 )
 from app.accounts.models.user import UserDoc
 from app.auth.password import verify_password, hash_password
 from app.utils.audit import log_audit
 from app.encryption.encryption import encrypt_value_deterministic, decrypt_value, encrypt_value
 from app.database.config import settings
+from app.utils.email import send_email
+from app.accounts.models.password_reset import PasswordReset
 
 
 # router = APIRouter()
@@ -413,6 +420,147 @@ async def set_mpin(payload: MPINSetRequest, request: Request):
     )
 
     return {"message": "MPIN set"}
+
+
+@router.post("/auth/change-password")
+async def change_password(payload: ChangePasswordRequest, request: Request):
+    user, _ = await _get_user_from_authorization(request)
+    client_encryption = request.app.client_encryption
+    stored = _decrypt_to_str(client_encryption, user.password)
+    if not stored or not verify_password(payload.current_password, stored):
+        raise HTTPException(status_code=401, detail="Invalid current password")
+    if payload.new_password != payload.confirm_new_password:
+        raise HTTPException(status_code=400, detail="Password mismatch")
+    new_hashed = hash_password(payload.new_password)
+    user.password = encrypt_value(client_encryption, request.app.dek_id, new_hashed)
+    await user.save()
+    await log_audit(
+        request=request,
+        action="CHANGE_PASSWORD",
+        resource="auth",
+        resource_id=str(user.id),
+        status="success",
+        notes="Password changed"
+    )
+    return {"message": "Password changed"}
+
+
+@router.post("/auth/forgot-setpin")
+async def forgot_setpin(payload: ForgotMPINSetRequest, request: Request):
+    user = await _authenticate_user(payload.email, payload.password, request)
+    if payload.mpin != payload.confirm_mpin:
+        raise HTTPException(status_code=400, detail="MPIN mismatch")
+    client_encryption = request.app.client_encryption
+    hashed_mpin = hash_password(payload.mpin)
+    enc_mpin = encrypt_value_deterministic(client_encryption, request.app.dek_id, hashed_mpin)
+    enc_mpin_index = encrypt_value_deterministic(client_encryption, request.app.dek_id, payload.mpin)
+    enc_deviceid_index = encrypt_value_deterministic(client_encryption, request.app.dek_id, payload.device_id)
+    user.mpin = enc_mpin
+    user.mpin_index = enc_mpin_index
+    user.device_id = enc_deviceid_index
+    await user.save()
+    await log_audit(
+        request=request,
+        action="FORGOT_SETPIN",
+        resource="auth",
+        resource_id=str(user.id),
+        status="success",
+        notes="MPIN reset via credentials"
+    )
+    return {"message": "MPIN updated"}
+
+
+@router.post("/auth/forgot-password/request")
+async def forgot_password_request(payload: ForgotPasswordRequest, request: Request):
+    user = await _get_user_by_email(payload.email, request)
+    import secrets
+    otp = "".join([str(secrets.randbelow(10)) for _ in range(6)])
+    otp_hash = hash_password(otp)
+    reset = PasswordReset(
+        user=user,
+        user_id=str(user.id),
+        email=str(payload.email),
+        otp_hash=otp_hash,
+    )
+    await reset.insert()
+    html = f"<p>Your password reset code is <b>{otp}</b>. It expires in 10 minutes.</p>"
+    text = f"Your password reset code is {otp}. It expires in 10 minutes."
+    try:
+        send_email(str(payload.email), "Password Reset Code", html, text)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    await log_audit(
+        request=request,
+        action="FORGOT_PASSWORD_REQUEST",
+        resource="auth",
+        resource_id=str(user.id),
+        status="success",
+        notes="OTP sent"
+    )
+    return {"message": "OTP sent", "reset_id": str(reset.id)}
+
+
+@router.post("/auth/forgot-password/verify")
+async def forgot_password_verify(payload: ForgotPasswordVerifyRequest, request: Request):
+    now = datetime.now(timezone.utc)
+    resets = await PasswordReset.find(PasswordReset.used == False).sort("-created_at").to_list()
+    target = None
+    for r in resets:
+        exp = r.expires_at
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if now <= exp and verify_password(payload.otp, r.otp_hash):
+            target = r
+            break
+    if not target:
+        raise HTTPException(status_code=401, detail="Invalid or expired code")
+    target.verified = True
+    await target.save()
+    await log_audit(
+        request=request,
+        action="FORGOT_PASSWORD_VERIFY",
+        resource="auth",
+        resource_id=str(target.user_id),
+        status="success",
+        notes="OTP verified"
+    )
+    return {"message": "OTP verified"}
+
+
+@router.post("/auth/forgot-password/reset")
+async def forgot_password_reset(payload: ForgotPasswordResetRequest, request: Request):
+    now = datetime.now(timezone.utc)
+    resets = await PasswordReset.find(PasswordReset.used == False, PasswordReset.verified == True).sort("-created_at").to_list()
+    target = None
+    for r in resets:
+        exp = r.expires_at
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if now <= exp:
+            target = r
+            break
+    if not target:
+        raise HTTPException(status_code=400, detail="No verified reset found or code expired")
+    if payload.new_password != payload.confirm_new_password:
+        raise HTTPException(status_code=400, detail="Password mismatch")
+    user = await UserDoc.get(target.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    client_encryption = request.app.client_encryption
+    new_hashed = hash_password(payload.new_password)
+    user.password = encrypt_value(client_encryption, request.app.dek_id, new_hashed)
+    await user.save()
+    target.used = True
+    await target.save()
+    await log_audit(
+        request=request,
+        action="FORGOT_PASSWORD_RESET",
+        resource="auth",
+        resource_id=str(user.id),
+        status="success",
+        notes="Password reset after OTP verify"
+    )
+    return {"message": "Password updated"}
 
 
 # @router.post("/auth/login-mpin", response_model=TokenResponse)

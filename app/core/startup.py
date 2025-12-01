@@ -4,6 +4,7 @@ from app.database.config import settings
 from app.encryption.encryption import init_encryption, ensure_data_key
 from app.accounts.models.patient import PatientDoc
 from app.accounts.models.user import UserDoc
+from app.accounts.models.password_reset import PasswordReset
 from app.facility.models.facility import Facility
 from app.facility.models.branding import BrandingDoc
 from app.facility.models.contacts import ContactsDoc
@@ -27,7 +28,7 @@ async def startup_app(app):
     await init_beanie(
         database=app.db,
         document_models=[
-            PatientDoc, AuditLog, UserDoc,
+            PatientDoc, AuditLog, UserDoc, PasswordReset,
             Facility,
             BrandingDoc, ContactsDoc, AddressDoc,
             BasicDoc, StructureDoc, RoomsDoc, RoomsBedsDoc,
@@ -41,7 +42,6 @@ async def startup_app(app):
     app.revoked_jti = set()
 
     print("🚀 App started with Mongo + CSFLE ready")
-
 async def shutdown_app(app):
     app.mongodb.close()
     app.client_encryption.close()

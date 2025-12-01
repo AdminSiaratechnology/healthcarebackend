@@ -36,6 +36,44 @@ class MPINSetRequest(BaseModel):
             raise ValueError("MPIN must be 4-6 digits")
         return v
 
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+    confirm_new_password: str
+
+
+class ForgotMPINSetRequest(BaseModel):
+    email: EmailStr
+    password: str
+    mpin: str
+    confirm_mpin: str
+    device_id: Optional[str] = None
+
+    @field_validator("mpin", "confirm_mpin")
+    @classmethod
+    def validate_mpin(cls, v: str):
+        if not v.isdigit():
+            raise ValueError("MPIN must be numeric")
+        if len(v) < 4 or len(v) > 6:
+            raise ValueError("MPIN must be 4-6 digits")
+        return v
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ForgotPasswordVerifyRequest(BaseModel):
+    otp: str
+    # new_password: str
+    # confirm_new_password: str
+
+
+class ForgotPasswordResetRequest(BaseModel):
+    new_password: str
+    confirm_new_password: str
+
 class MPINLoginRequest(BaseModel):
     email: EmailStr
     mpin: str

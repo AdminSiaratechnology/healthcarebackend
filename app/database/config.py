@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Settings(BaseSettings):
     MONGO_URI: str
     DB_NAME: str
@@ -12,7 +13,12 @@ class Settings(BaseSettings):
     JWT_SECRET: str | None = None
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
-
+    SMTP_HOST: str | None = None
+    SMTP_PORT: int | None = 587
+    SMTP_USER: str | None = None
+    SMTP_PASS: str | None = None
+    SMTP_FROM: str | None = None
+    SMTP_FROM_NAME: str | None = None
     model_config = SettingsConfigDict(  
         env_file=".env",
         env_file_encoding='utf-8',
