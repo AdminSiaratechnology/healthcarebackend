@@ -4,20 +4,25 @@ from app.database.config import settings
 from app.encryption.encryption import init_encryption, ensure_data_key
 from app.accounts.models.patient import PatientDoc
 from app.accounts.models.user import UserDoc
+from app.accounts.models.admin import Admin
+
 from app.accounts.models.password_reset import PasswordReset
 from app.facility.models.facility import Facility
-from app.facility.models.branding import BrandingDoc
-from app.facility.models.contacts import ContactsDoc
-from app.facility.models.address import AddressDoc
-from app.facility.models.basic import BasicDoc
-from app.facility.models.structure import StructureDoc
-from app.facility.models.rooms import RoomsDoc
-from app.facility.models.rooms_beds import RoomsBedsDoc
-from app.facility.models.partners import PartnersDoc
-from app.facility.models.it_workstations import WorkstationsDoc
-from app.facility.models.interoperability import InteroperabilityDoc
-from app.facility.models.regulatory import RegulatoryDoc
-from app.facility.models.key_contacts import KeyContactsDoc
+from app.facility.models.facility_branding import FacilityBranding
+from app.facility.models.campusblock import CampusBlock
+from app.facility.models.facility_floor import FacilityFloor
+from app.facility.models.facility_department import FacilityDepartment
+from app.facility.models.facility_rooms import FacilityRooms
+from app.facility.models.beds import Beds
+from app.facility.models.keycontact import KeyContact
+from app.facility.models.pharmacies import Pharmacies
+from app.facility.models.laboratory import Laboratory
+from app.facility.models.imaging_center import ImagingCenter
+from app.facility.models.network_config import NetworkConfig
+from app.facility.models.wifi_network import WifiNetwork
+from app.facility.models.workstations import WorkStation
+from app.facility.models.DeviceInventory import DeviceInventory
+from app.facility.models.interoperability import Interoperability
 
 from app.utils.audit import AuditLog
 
@@ -30,10 +35,22 @@ async def startup_app(app):
         document_models=[
             PatientDoc, AuditLog, UserDoc, PasswordReset,
             Facility,
-            BrandingDoc, ContactsDoc, AddressDoc,
-            BasicDoc, StructureDoc, RoomsDoc, RoomsBedsDoc,
-            PartnersDoc, WorkstationsDoc, InteroperabilityDoc, RegulatoryDoc,
-            KeyContactsDoc,
+            FacilityBranding,
+            CampusBlock,
+            FacilityFloor,
+            FacilityDepartment,
+            FacilityRooms,
+            Beds,
+            KeyContact,
+            Pharmacies,
+            Laboratory,
+            ImagingCenter,
+            NetworkConfig, 
+            WifiNetwork,
+            WorkStation,
+            DeviceInventory,
+            Interoperability,
+            Admin
         ]
         )
      # Encryption init

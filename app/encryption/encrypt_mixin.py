@@ -1,10 +1,11 @@
+from typing import ClassVar, Set
 from app.encryption.encryption import encrypt_value
 
 class AutoEncryptMixin:
     """
     Mixin to automatically encrypt fields marked as `encrypted_fields`
     """
-    encrypted_fields = set()
+    encrypted_fields: ClassVar[Set[str]] = set()
 
     def encrypt_fields(self, client_encryption, key_id):
         """

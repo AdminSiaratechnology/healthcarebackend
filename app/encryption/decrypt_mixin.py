@@ -1,3 +1,4 @@
+from typing import ClassVar, Set
 from bson.binary import Binary
 from app.encryption.encryption import decrypt_value
 
@@ -5,7 +6,7 @@ class AutoDecryptMixin:
     """
     Mixin to automatically decrypt fields marked as `encrypted_fields`
     """
-    encrypted_fields = set()
+    encrypted_fields: ClassVar[Set[str]] = set()
 
     def decrypt_fields(self, client_encryption):
         decrypted = {}

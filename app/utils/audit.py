@@ -51,9 +51,9 @@ class AuditLog(Document):
     class Settings:
         name = "audit_logs"
 
-async def log_audit(request, action, resource, resource_id, status="success", notes=None):
+async def log_audit(user_id,request, action, resource, resource_id, status="success", notes=None):
 
-    user_id = request.headers.get("X-User-ID", "anonymous")  # JWT me bhi ho sakta hai
+      # JWT me bhi ho sakta hai
     ip = request.client.host
     ua = request.headers.get("User-Agent", "")
 

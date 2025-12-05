@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, HTTPException, Depends
+from fastapi import APIRouter, Request, HTTPException, Depends, UploadFile, File
 from jose import jwt, JWTError
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -7,6 +7,9 @@ import base64
 import io
 import pyotp
 import qrcode
+import os
+import uuid
+import json
 from app.schemas.auth import (
     LoginRequest,
     TokenResponse,
@@ -22,8 +25,11 @@ from app.schemas.auth import (
     ForgotPasswordRequest,
     ForgotPasswordVerifyRequest,
     ForgotPasswordResetRequest,
+    EditProfileRequest,
 )
+from app.schemas.admin import AdminProfile
 from app.accounts.models.user import UserDoc
+from app.accounts.models.admin import Admin
 from app.auth.password import verify_password, hash_password
 from app.utils.audit import log_audit
 from app.encryption.encryption import encrypt_value_deterministic, decrypt_value, encrypt_value
@@ -34,6 +40,9 @@ from app.accounts.models.password_reset import PasswordReset
 
 # router = APIRouter()
 router = APIRouter(prefix="/account", tags=["Account"])
+
+UPLOAD_DIR_PROFILE_PHOTOS = "./uploads/profile_photos"
+os.makedirs(UPLOAD_DIR_PROFILE_PHOTOS, exist_ok=True)
 
 
 def _get_jwt_settings():
@@ -159,6 +168,67 @@ def _build_qr_code_image(data: str) -> str:
     return f"data:image/png;base64,{encoded}"
 
 
+def _build_default_admin_profile_for_user(user: UserDoc, client_encryption) -> AdminProfile:
+    """Construct a baseline admin profile from an existing user."""
+    full_name = _decrypt_to_str(client_encryption, user.full_name)
+    email = _decrypt_to_str(client_encryption, user.email)
+    phone = _decrypt_to_str(client_encryption, user.phone)
+
+    data = {
+        "personal": {
+            "personal_information": {
+                "photo_url": None,
+                "first_name": full_name,
+                "middle_name": None,
+                "last_name": "",
+                "suffix_credential": None,
+                "date_of_birth": None,
+                "gender": None,
+            },
+            "contact_information": {
+                "primary_email_address": email,
+                "alternate_email": None,
+                "primary_phone": phone,
+                "alternate_phone": None,
+                "fax_number": None,
+            },
+            "address_details": {},
+            "emergency_contact": {},
+        },
+        "professional": {
+            "professional_credentials": {},
+            "medical_license_information": {},
+            "board_certification": {},
+            "education": {},
+            "additional_certifications": [],
+        },
+        "organization": {
+            "organization_details": {},
+            "primary_organization_contact": {},
+        },
+        "security": {
+            "two_factor_auth": {"authenticator_app_enabled": False},
+            "session_timeout_minutes": None,
+            "auto_lock_minutes": None,
+            "ip_whitelist": [],
+            "login_notifications_enabled": False,
+            "api_access_enabled": False,
+            "security_audit_log_enabled": False,
+            "compliance_certifications": [],
+        },
+        "settings": {
+            "regional_settings": {},
+            "notification_preferences": {},
+            "email_notification_schedule": {},
+            "display_appearance": {},
+            "email_signature": {},
+            "danger_zone": {},
+        },
+    }
+
+    return AdminProfile.model_validate(data)
+
+
 @router.post("/auth/login", response_model=TokenResponse)
 async def login(payload: LoginRequest, request: Request):
     user = await _authenticate_user(payload.email, payload.password, request)
@@ -275,6 +345,7 @@ async def verify_google_auth(payload: GoogleAuthVerifyRequest, request: Request)
 
     await log_audit(
         request=request,
+        user_id=str(user.id),
         action="GOOGLE_AUTH_VERIFY",
         resource="auth",
         resource_id=str(user.id),
@@ -311,6 +382,7 @@ async def logout(request: Request):
 
     await log_audit(
         request=request,
+        user_id= sub or "anonymous",
         action="LOGOUT",
         resource="auth",
         resource_id=sub or "N/A",
@@ -359,6 +431,14 @@ async def get_profile(request: Request):
     phone = _dec(user.phone)
     role_val = _dec(user.role)
 
+    # If admin, also load and decrypt admin profile
+    admin_profile = None
+    if role_val == "admin":
+        admin_doc = await Admin.find_one(Admin.user_id == str(user.id))
+        if admin_doc:
+            dec_admin = admin_doc.decrypt_fields(client_encryption)
+            admin_profile = dec_admin.get("profile")
+
     return ProfileResponse(
         id=str(user.id),
         full_name=full_name,
@@ -368,7 +448,157 @@ async def get_profile(request: Request):
         is_active=user.is_active,
         created_at=user.created_at,
         updated_at=user.updated_at,
+        admin_profile=admin_profile,
     )
+
+
+@router.put("/auth/profile", response_model=ProfileResponse)
+async def update_profile(payload: EditProfileRequest, request: Request):
+    # Reuse common auth helper
+    user, _ = await _get_user_from_authorization(request)
+
+    client_encryption = request.app.client_encryption
+    dek_id = request.app.dek_id
+
+    # Update basic user fields if provided
+    if payload.full_name is not None:
+        user.full_name = encrypt_value(client_encryption, dek_id, payload.full_name)
+    if payload.phone is not None:
+        user.phone = encrypt_value(client_encryption, dek_id, payload.phone)
+
+    user.updated_at = datetime.now(timezone.utc)
+    await user.save()
+
+    # Determine role for response and possible admin profile update
+    role_val = _decrypt_to_str(client_encryption, user.role)
+
+    admin_profile = None
+    if role_val == "admin":
+        # Load or create admin document
+        admin_doc = await Admin.find_one(Admin.user_id == str(user.id))
+
+        if payload.admin_profile is not None:
+            if not admin_doc:
+                admin_doc = Admin(user=user, user_id=str(user.id))
+
+            # Set plain profile data before encryption
+            admin_doc.profile = payload.admin_profile.model_dump(mode="json", serialize_as_any=True)
+
+            # Encrypt configured fields and assign back to the document
+            enc_fields = admin_doc.encrypt_fields(client_encryption, dek_id)
+            for field_name, value in enc_fields.items():
+                setattr(admin_doc, field_name, value)
+
+            admin_doc.updated_at = datetime.now(timezone.utc)
+            if getattr(admin_doc, "id", None) is None:
+                admin_doc.created_at = datetime.now(timezone.utc)
+                await admin_doc.insert()
+            else:
+                await admin_doc.save()
+
+            # For response, decrypt the stored profile
+            dec_admin = admin_doc.decrypt_fields(client_encryption)
+            admin_profile = dec_admin.get("profile")
+        elif admin_doc:
+            # No change requested, just return existing decrypted profile
+            dec_admin = admin_doc.decrypt_fields(client_encryption)
+            admin_profile = dec_admin.get("profile")
+
+    # Decrypt user fields for response
+    full_name = _decrypt_to_str(client_encryption, user.full_name)
+    email = _decrypt_to_str(client_encryption, user.email)
+    phone = _decrypt_to_str(client_encryption, user.phone)
+
+    return ProfileResponse(
+        id=str(user.id),
+        full_name=full_name,
+        email=email,
+        phone=phone,
+        role=role_val,
+        is_active=user.is_active,
+        created_at=user.created_at,
+        updated_at=user.updated_at,
+        admin_profile=admin_profile,
+    )
+
+
+@router.post("/auth/profile/photo")
+async def upload_profile_photo(
+    request: Request,
+    file: UploadFile = File(...),
+):
+    # Authenticate user
+    user, _ = await _get_user_from_authorization(request)
+
+    client_encryption = request.app.client_encryption
+    dek_id = request.app.dek_id
+
+    role_val = _decrypt_to_str(client_encryption, user.role)
+    if role_val != "admin":
+        raise HTTPException(status_code=403, detail="Only admin users can upload profile photos")
+
+    # Validate & save image
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file uploaded")
+
+    ext = file.filename.split(".")[-1].lower()
+    if ext not in ["png", "jpg", "jpeg", "gif", "webp"]:
+        raise HTTPException(status_code=400, detail="Invalid image format")
+
+    filename = f"{uuid.uuid4()}.{ext}"
+    path = os.path.join(UPLOAD_DIR_PROFILE_PHOTOS, filename)
+    with open(path, "wb") as f:
+        f.write(await file.read())
+
+    photo_url = f"http://localhost:8000/uploads/profile_photos/{filename}"
+
+    # Load or build admin profile
+    admin_doc = await Admin.find_one(Admin.user_id == str(user.id))
+
+    profile_obj: AdminProfile
+    if admin_doc and admin_doc.profile:
+        # Decrypt existing profile
+        decrypted_raw = decrypt_value(client_encryption, admin_doc.profile)
+        if isinstance(decrypted_raw, (bytes, bytearray)):
+            decrypted_raw = decrypted_raw.decode("utf-8")
+            try:
+                profile_dict = json.loads(decrypted_raw)
+            except json.JSONDecodeError:
+                profile_dict = {}
+        elif isinstance(decrypted_raw, str):
+            try:
+                profile_dict = json.loads(decrypted_raw)
+            except json.JSONDecodeError:
+                profile_dict = {}
+        elif isinstance(decrypted_raw, dict):
+            profile_dict = decrypted_raw
+        else:
+            profile_dict = {}
+
+        profile_obj = AdminProfile.model_validate(profile_dict)
+    else:
+        profile_obj = _build_default_admin_profile_for_user(user, client_encryption)
+
+    # Update photo_url
+    profile_obj.personal.personal_information.photo_url = photo_url
+
+    profile_data = profile_obj.model_dump(mode="json", serialize_as_any=True)
+    encrypted_profile = encrypt_value(client_encryption, dek_id, profile_data)
+
+    if not admin_doc:
+        admin_doc = Admin(user=user, user_id=str(user.id))
+
+    admin_doc.profile = encrypted_profile
+    now = datetime.now(timezone.utc)
+    if getattr(admin_doc, "id", None) is None:
+        admin_doc.created_at = now
+        admin_doc.updated_at = now
+        await admin_doc.insert()
+    else:
+        admin_doc.updated_at = now
+        await admin_doc.save()
+
+    return {"photo_url": photo_url}
 
 
 @router.post("/auth/set-mpin")
@@ -412,6 +642,7 @@ async def set_mpin(payload: MPINSetRequest, request: Request):
 
     await log_audit(
         request=request,
+        user_id=str(user.id),
         action="SET_MPIN",
         resource="auth",
         resource_id=str(user.id),
@@ -436,6 +667,7 @@ async def change_password(payload: ChangePasswordRequest, request: Request):
     await user.save()
     await log_audit(
         request=request,
+        user_id=str(user.id),
         action="CHANGE_PASSWORD",
         resource="auth",
         resource_id=str(user.id),
@@ -461,6 +693,7 @@ async def forgot_setpin(payload: ForgotMPINSetRequest, request: Request):
     await user.save()
     await log_audit(
         request=request,
+        user_id=str(user.id),
         action="FORGOT_SETPIN",
         resource="auth",
         resource_id=str(user.id),
@@ -518,6 +751,7 @@ async def forgot_password_verify(payload: ForgotPasswordVerifyRequest, request: 
     await target.save()
     await log_audit(
         request=request,
+        user_id=str(target.user_id),
         action="FORGOT_PASSWORD_VERIFY",
         resource="auth",
         resource_id=str(target.user_id),
@@ -554,6 +788,7 @@ async def forgot_password_reset(payload: ForgotPasswordResetRequest, request: Re
     await target.save()
     await log_audit(
         request=request,
+        user_id=str(user.id),
         action="FORGOT_PASSWORD_RESET",
         resource="auth",
         resource_id=str(user.id),
@@ -645,6 +880,7 @@ async def login_mpin_only(payload: MPINOnlyLoginRequest, request: Request):
 
     await log_audit(
         request=request,
+        user_id=str(user.id),
         action="LOGIN_MPIN_ONLY",
         resource="auth",
         resource_id=str(user.id),

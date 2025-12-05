@@ -1,6 +1,7 @@
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 from app.accounts.models.user import UserRole
+from app.schemas.admin import AdminProfile
 
 class Users(BaseModel):
     full_name : str
@@ -8,4 +9,5 @@ class Users(BaseModel):
     phone : Optional[str] = None
     role : UserRole
     password : Optional[str] = None
+    admin_profile: Optional[AdminProfile] = None
 
