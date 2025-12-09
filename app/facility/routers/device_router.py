@@ -98,3 +98,74 @@ async def create_device_inventory(
         except Exception:
             pass
         raise HTTPException(status_code=500, detail="Internal Server Error while creating device inventory")
+
+
+def _decrypt_value(client_encryption, encrypted_val):
+    if not encrypted_val:
+        return None
+    decrypted_raw = decrypt_value(client_encryption, encrypted_val)
+    if isinstance(decrypted_raw, (bytes, bytearray)):
+        decrypted_raw = decrypted_raw.decode()
+    return decrypted_raw
+
+
+@router.get("/get/device-inventory/{facility_id}/")
+async def get_device_inventories(
+    facility_id: str,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    user = await UserDoc.get(current_user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    facility_obj = None
+    try:
+        facility_obj_id = PydanticObjectId(facility_id)
+        facility_obj = await Facility.get(facility_obj_id)
+    except Exception:
+        pass
+
+    if facility_obj is None:
+        facility_obj = await Facility.get(facility_id)
+    if not facility_obj:
+        raise HTTPException(status_code=404, detail="Facility not found")
+
+    ce = getattr(request.app, "client_encryption", None)
+
+    by_link = await DeviceInventory.find(DeviceInventory.facility_id.id == facility_obj.id).to_list()
+    by_str = await DeviceInventory.find(DeviceInventory.facility_id == str(facility_obj.id)).to_list()
+
+    seen = set()
+    docs = []
+    for d in by_link + by_str:
+        if str(d.id) in seen:
+            continue
+        seen.add(str(d.id))
+        docs.append(d)
+
+    result = [
+        {
+            "id": str(di.id),
+            "device_type": _decrypt_value(ce, di.device_type),
+            "count": _decrypt_value(ce, di.count),
+            "operating_system": _decrypt_value(ce, di.operating_system),
+            "created_at": di.created_at,
+            "updated_at": di.updated_at,
+        } for di in docs
+    ]
+
+    try:
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Read",
+            resource="Device Inventory",
+            resource_id=str(facility_obj.id),
+            status="success",
+            notes="Device inventories fetched successfully",
+        )
+    except Exception:
+        pass
+
+    return result

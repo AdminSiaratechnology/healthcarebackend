@@ -97,3 +97,65 @@ async def create_campus_block(
             status_code=500,
             detail="Internal Server Error while creating campus block"
         )
+
+
+@router.get("/get/campusblock/{facility_id}/")
+async def get_campus_blocks(
+    facility_id: str,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    user = await UserDoc.get(current_user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    facility_obj = None
+    try:
+        from beanie import PydanticObjectId
+        facility_obj_id = PydanticObjectId(facility_id)
+        facility_obj = await Facility.get(facility_obj_id)
+    except Exception:
+        pass
+
+    if facility_obj is None:
+        facility_obj = await Facility.get(facility_id)
+    if not facility_obj:
+        raise HTTPException(status_code=404, detail="Facility not found")
+
+    ce = request.app.client_encryption
+
+    by_link = await CampusBlock.find(CampusBlock.facility_id.id == facility_obj.id).to_list()
+    by_str = await CampusBlock.find(CampusBlock.facility_id == str(facility_obj.id)).to_list()
+
+    seen = set()
+    docs = []
+    for d in by_link + by_str:
+        if str(d.id) in seen:
+            continue
+        seen.add(str(d.id))
+        docs.append(d)
+
+    result = [
+        {
+            "id": str(cb.id),
+            "block_code": _decrypt_json_field(ce, cb.block_code),
+            "block_name": _decrypt_json_field(ce, cb.block_name),
+            "created_at": cb.created_at,
+            "updated_at": cb.updated_at,
+        } for cb in docs
+    ]
+
+    try:
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Read",
+            resource="Facility Campus Block",
+            resource_id=str(facility_obj.id),
+            status="success",
+            notes="Campus blocks fetched successfully",
+        )
+    except Exception:
+        pass
+
+    return result

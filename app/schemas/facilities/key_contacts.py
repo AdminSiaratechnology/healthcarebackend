@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from typing import Optional
 from enum import Enum
+from typing import List
 
 
 class typeofdirector(str, Enum):
@@ -52,5 +53,7 @@ class KeyContacts(BaseModel):
     medical_director: Optional[MedicalDirector] = None
     admission_coordinator: Optional[AdmissionCoordinator] = None
     it_administrator: Optional[ITAdministrator] = None
-    charge_nurse: Optional[chargeNurses] = None
-    emergency_contact: Optional[EmergencyContact] = None
+    # charge_nurse: Optional[chargeNurses] = None
+    # emergency_contact: Optional[EmergencyContact] = None
+    charge_nurse: Optional[List[chargeNurses]] = None  # List of charge nurses
+    emergency_contact: Optional[List[EmergencyContact]] = None  # List of emergency contacts

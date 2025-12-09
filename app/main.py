@@ -19,6 +19,11 @@ from app.facility.routers.wifi_network_router import router as wifi_network_rout
 from app.facility.routers.work_station_router import router as work_station_router
 from app.facility.routers.device_router import router as device_router
 from app.facility.routers.interoperability_router import router as interoperability_router
+from app.facility.routers.regulatory_router import router as regulatory_router
+from app.facility.routers.standards_router import router as standards_router
+from app.facility.routers.workflow_router import router as workflow_router
+from app.facility.routers.security_router import router as security_router
+from app.facility.routers.quality_router import router as quality_router
 from fastapi.middleware.cors import CORSMiddleware
 
 
@@ -68,3 +73,8 @@ app.include_router(wifi_network_router)
 app.include_router(work_station_router)
 app.include_router(device_router)
 app.include_router(interoperability_router)
+app.include_router(regulatory_router)
+app.include_router(standards_router)
+app.include_router(workflow_router)
+app.include_router(security_router)
+app.include_router(quality_router)

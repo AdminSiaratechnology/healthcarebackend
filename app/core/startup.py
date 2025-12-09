@@ -23,6 +23,12 @@ from app.facility.models.wifi_network import WifiNetwork
 from app.facility.models.workstations import WorkStation
 from app.facility.models.DeviceInventory import DeviceInventory
 from app.facility.models.interoperability import Interoperability
+from app.facility.models.regulatory import RegulatoryInfoDoc
+from app.facility.models.standards import StandardsDoc
+from app.facility.models.workflow import WorkflowDoc
+from app.facility.models.security import SecurityDoc
+from app.facility.models.quality import QualityDoc
+from app.facility.models.attachments.floor_plans import FloorPlanDoc
 
 from app.utils.audit import AuditLog
 
@@ -50,6 +56,12 @@ async def startup_app(app):
             WorkStation,
             DeviceInventory,
             Interoperability,
+            RegulatoryInfoDoc,
+            StandardsDoc,
+            WorkflowDoc,
+            SecurityDoc,
+            QualityDoc,
+            FloorPlanDoc,
             Admin
         ]
         )

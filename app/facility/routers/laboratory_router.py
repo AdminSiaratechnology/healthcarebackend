@@ -91,3 +91,77 @@ async def create_laboratory(
             status_code=500,
             detail="Internal Server Error while creating laboratory"
         )
+
+
+def _decrypt_value(client_encryption, encrypted_val):
+    if not encrypted_val:
+        return None
+    decrypted_raw = decrypt_value(client_encryption, encrypted_val)
+    if isinstance(decrypted_raw, (bytes, bytearray)):
+        decrypted_raw = decrypted_raw.decode()
+    return decrypted_raw
+
+
+@router.get("/get/laboratory/{facility_id}/")
+async def get_laboratories(
+    facility_id: str,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    user = await UserDoc.get(current_user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    facility_obj = None
+    try:
+        facility_obj_id = PydanticObjectId(facility_id)
+        facility_obj = await Facility.get(facility_obj_id)
+    except Exception:
+        pass
+
+    if facility_obj is None:
+        facility_obj = await Facility.get(facility_id)
+    if not facility_obj:
+        raise HTTPException(status_code=404, detail="Facility not found")
+
+    ce = request.app.client_encryption
+
+    by_link = await Laboratory.find(Laboratory.facility_id.id == facility_obj.id).to_list()
+    by_str = await Laboratory.find(Laboratory.facility_id == str(facility_obj.id)).to_list()
+
+    seen = set()
+    docs = []
+    for d in by_link + by_str:
+        if str(d.id) in seen:
+            continue
+        seen.add(str(d.id))
+        docs.append(d)
+
+    result = [
+        {
+            "id": str(lb.id),
+            "laboratory_name": _decrypt_value(ce, lb.laboratory_name),
+            "phone": _decrypt_value(ce, lb.phone),
+            "fax": _decrypt_value(ce, lb.fax),
+            "pickup_schedule": _decrypt_value(ce, lb.pickup_schedule),
+            "interface_type": _decrypt_value(ce, lb.interface_type),
+            "loinc_policy": _decrypt_value(ce, lb.loinc_policy),
+            "created_at": lb.created_at,
+            "updated_at": lb.updated_at,
+        } for lb in docs
+    ]
+
+    try:
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Read",
+            resource="Laboratory",
+            resource_id=str(facility_obj.id),
+            status="success",
+            notes="Laboratories fetched successfully",
+        )
+    except Exception:
+        pass
+
+    return result

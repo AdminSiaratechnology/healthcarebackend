@@ -102,3 +102,88 @@ async def create_bed(
             status_code=500,
             detail="Internal Server Error while creating bed"
         )
+
+
+def _decrypt_value(client_encryption, encrypted_val):
+    if not encrypted_val:
+        return None
+    decrypted_raw = decrypt_value(client_encryption, encrypted_val)
+    if isinstance(decrypted_raw, (bytes, bytearray)):
+        decrypted_raw = decrypted_raw.decode()
+    return decrypted_raw
+
+
+@router.get("/get/bed/{facility_id}/")
+async def get_beds(
+    facility_id: str,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    user = await UserDoc.get(current_user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    facility_obj = None
+    try:
+        facility_obj_id = PydanticObjectId(facility_id)
+        facility_obj = await Facility.get(facility_obj_id)
+    except Exception:
+        pass
+
+    if facility_obj is None:
+        facility_obj = await Facility.get(facility_id)
+    if not facility_obj:
+        raise HTTPException(status_code=404, detail="Facility not found")
+
+    ce = request.app.client_encryption
+
+    rooms_by_link = await FacilityRooms.find(FacilityRooms.facility_id.id == facility_obj.id).to_list()
+    rooms_by_str = await FacilityRooms.find(FacilityRooms.facility_id == str(facility_obj.id)).to_list()
+
+    seen_r = set()
+    rooms = []
+    for r in rooms_by_link + rooms_by_str:
+        if str(r.id) in seen_r:
+            continue
+        seen_r.add(str(r.id))
+        rooms.append(r)
+
+    beds_for_facility = []
+    seen_b = set()
+    for r in rooms:
+        rr_beds = await Beds.find(Beds.room_id.id == r.id).to_list()
+        for b in rr_beds:
+            if str(b.id) in seen_b:
+                continue
+            seen_b.add(str(b.id))
+            beds_for_facility.append(b)
+
+    result = [
+        {
+            "id": str(b.id),
+            "bed_id": _decrypt_value(ce, b.bed_id),
+            "designation": _decrypt_value(ce, b.designation),
+            "status": _decrypt_value(ce, b.status),
+            "bariatric": _decrypt_value(ce, b.bariatric),
+            "room_id": (str((await b.room_id.fetch()).id) if b.room_id else None),
+            "last_sanitized": b.last_sanitized,
+            "bed_policy": _decrypt_value(ce, b.bed_policy),
+            "created_at": b.created_at,
+            "updated_at": b.updated_at,
+        } for b in beds_for_facility
+    ]
+
+    try:
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Read",
+            resource="Bed",
+            resource_id=str(facility_obj.id),
+            status="success",
+            notes="Beds fetched successfully",
+        )
+    except Exception:
+        pass
+
+    return result

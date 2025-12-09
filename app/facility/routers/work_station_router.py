@@ -105,3 +105,84 @@ async def create_workstation(
         except Exception:
             pass
         raise HTTPException(status_code=500, detail="Internal Server Error while creating workstation")
+
+
+def _decrypt_value(client_encryption, encrypted_val):
+    if not encrypted_val:
+        return None
+    decrypted_raw = decrypt_value(client_encryption, encrypted_val)
+    if isinstance(decrypted_raw, (bytes, bytearray)):
+        decrypted_raw = decrypted_raw.decode()
+    return decrypted_raw
+
+
+def _decrypt_json_field(client_encryption, encrypted_val):
+    if not encrypted_val:
+        return None
+    decrypted_raw = decrypt_value(client_encryption, encrypted_val)
+    if isinstance(decrypted_raw, (bytes, bytearray)):
+        decrypted_raw = decrypted_raw.decode()
+    return json.loads(decrypted_raw)
+
+
+@router.get("/get/workstation/{facility_id}/")
+async def get_workstations(
+    facility_id: str,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    user = await UserDoc.get(current_user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    facility_obj = None
+    try:
+        facility_obj_id = PydanticObjectId(facility_id)
+        facility_obj = await Facility.get(facility_obj_id)
+    except Exception:
+        pass
+
+    if facility_obj is None:
+        facility_obj = await Facility.get(facility_id)
+    if not facility_obj:
+        raise HTTPException(status_code=404, detail="Facility not found")
+
+    ce = getattr(request.app, "client_encryption", None)
+
+    by_link = await WorkStation.find(WorkStation.facility_id.id == facility_obj.id).to_list()
+    by_str = await WorkStation.find(WorkStation.facility_id == str(facility_obj.id)).to_list()
+
+    seen = set()
+    docs = []
+    for d in by_link + by_str:
+        if str(d.id) in seen:
+            continue
+        seen.add(str(d.id))
+        docs.append(d)
+
+    result = [
+        {
+            "id": str(ws.id),
+            "workstation_code": _decrypt_value(ce, ws.workstation_code),
+            "location": _decrypt_value(ce, ws.location),
+            "operating_system": _decrypt_value(ce, ws.operating_system),
+            "peripherals": _decrypt_json_field(ce, ws.peripherals),
+            "created_at": ws.created_at,
+            "updated_at": ws.updated_at,
+        } for ws in docs
+    ]
+
+    try:
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Read",
+            resource="Workstation",
+            resource_id=str(facility_obj.id),
+            status="success",
+            notes="Workstations fetched successfully",
+        )
+    except Exception:
+        pass
+
+    return result

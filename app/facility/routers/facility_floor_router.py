@@ -104,3 +104,64 @@ async def create_facility_floor(
             status_code=500,
             detail="Internal Server Error while creating facility floor"
         )
+
+
+@router.get("/get/floor/{facility_id}/")
+async def get_facility_floors(
+    facility_id: str,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    user = await UserDoc.get(current_user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    facility_obj = None
+    try:
+        facility_obj_id = PydanticObjectId(facility_id)
+        facility_obj = await Facility.get(facility_obj_id)
+    except Exception:
+        pass
+
+    if facility_obj is None:
+        facility_obj = await Facility.get(facility_id)
+    if not facility_obj:
+        raise HTTPException(status_code=404, detail="Facility not found")
+
+    ce = request.app.client_encryption
+
+    by_link = await FacilityFloor.find(FacilityFloor.facility_id.id == facility_obj.id).to_list()
+    by_str = await FacilityFloor.find(FacilityFloor.facility_id == str(facility_obj.id)).to_list()
+
+    seen = set()
+    docs = []
+    for d in by_link + by_str:
+        if str(d.id) in seen:
+            continue
+        seen.add(str(d.id))
+        docs.append(d)
+
+    result = [
+        {
+            "id": str(f.id),
+            "floor_label": _decrypt_json_field(ce, f.floor_label),
+            "display": _decrypt_json_field(ce, f.display),
+            "created_at": f.created_at,
+            "updated_at": f.updated_at,
+        } for f in docs
+    ]
+
+    try:
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Read",
+            resource="Facility Floor",
+            resource_id=str(facility_obj.id),
+            status="success",
+            notes="Facility floors fetched successfully",
+        )
+    except Exception:
+        pass
+
+    return result

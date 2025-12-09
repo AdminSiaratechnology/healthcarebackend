@@ -88,3 +88,78 @@ async def create_pharmacy(
             status_code=500,
             detail="Internal Server Error while creating pharmacy"
         )
+
+
+def _decrypt_value(client_encryption, encrypted_val):
+    if not encrypted_val:
+        return None
+    decrypted_raw = decrypt_value(client_encryption, encrypted_val)
+    if isinstance(decrypted_raw, (bytes, bytearray)):
+        decrypted_raw = decrypted_raw.decode()
+    return decrypted_raw
+
+
+@router.get("/get/pharmacy/{facility_id}/")
+async def get_pharmacies(
+    facility_id: str,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    user = await UserDoc.get(current_user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    facility_obj = None
+    try:
+        facility_obj_id = PydanticObjectId(facility_id)
+        facility_obj = await Facility.get(facility_obj_id)
+    except Exception:
+        pass
+
+    if facility_obj is None:
+        facility_obj = await Facility.get(facility_id)
+    if not facility_obj:
+        raise HTTPException(status_code=404, detail="Facility not found")
+
+    ce = request.app.client_encryption
+
+    by_link = await Pharmacies.find(Pharmacies.facility_id.id == facility_obj.id).to_list()
+    by_str = await Pharmacies.find(Pharmacies.facility_id == str(facility_obj.id)).to_list()
+
+    seen = set()
+    docs = []
+    for d in by_link + by_str:
+        if str(d.id) in seen:
+            continue
+        seen.add(str(d.id))
+        docs.append(d)
+
+    result = [
+        {
+            "id": str(ph.id),
+            "pharmacy_name": _decrypt_value(ce, ph.pharmacy_name),
+            "phone": _decrypt_value(ce, ph.phone),
+            "address": _decrypt_value(ce, ph.address),
+            "fax": _decrypt_value(ce, ph.fax),
+            "after_hours_phone": _decrypt_value(ce, ph.after_hours_phone),
+            "contract_file_id": _decrypt_value(ce, ph.contract_file_id),
+            "delivery_schedule": _decrypt_value(ce, ph.delivery_schedule),
+            "created_at": ph.created_at,
+            "updated_at": ph.updated_at,
+        } for ph in docs
+    ]
+
+    try:
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Read",
+            resource="Pharmacy",
+            resource_id=str(facility_obj.id),
+            status="success",
+            notes="Pharmacies fetched successfully",
+        )
+    except Exception:
+        pass
+
+    return result
