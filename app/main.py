@@ -1,7 +1,6 @@
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
 from app.core.startup import startup_app, shutdown_app
-from app.accounts.routers.patient_router import router as patient_router
 from app.accounts.routers.user_router import router as user_router
 from app.accounts.routers.auth_router import router as auth_router
 from app.facility.routers.facility_router import router as facility_router
@@ -24,6 +23,12 @@ from app.facility.routers.standards_router import router as standards_router
 from app.facility.routers.workflow_router import router as workflow_router
 from app.facility.routers.security_router import router as security_router
 from app.facility.routers.quality_router import router as quality_router
+from app.provider.router.provider_router import router as provider_router
+from app.provider.router.practice_router import router as practice_router
+from app.provider.router.clinical_router import router as clinical_router
+from app.provider.router.security_router import router as provider_security_router
+from app.provider.router.provider_documents_router import router as provider_documents_router
+from app.patients.routers.patient_router import router as patient_router
 from fastapi.middleware.cors import CORSMiddleware
 
 
@@ -55,7 +60,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(patient_router) 
+
 app.include_router(user_router) 
 app.include_router(auth_router)
 app.include_router(facility_router)
@@ -78,3 +83,9 @@ app.include_router(standards_router)
 app.include_router(workflow_router)
 app.include_router(security_router)
 app.include_router(quality_router)
+app.include_router(provider_router)
+app.include_router(practice_router)
+app.include_router(clinical_router)
+app.include_router(provider_security_router)
+app.include_router(provider_documents_router)
+app.include_router(patient_router)

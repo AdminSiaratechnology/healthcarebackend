@@ -72,6 +72,7 @@ async def create_bed(
             designation=designation_enc,
             status=status_enc,
             bariatric=bariatric_enc,
+             facility_id=facility_obj_id,
         )
 
         await bed_doc.insert()

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 class DeviceInventory(Document, AutoEncryptMixin, AutoDecryptMixin):
     facility_id: Link[Facility] = Field(..., description="Reference to the associated facility")
     device_type: Binary | None = None
-    count: Binary | None = None
+    counts: Binary | None = None
     operating_system: Binary | None = None
     created_by: Link[UserDoc] | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

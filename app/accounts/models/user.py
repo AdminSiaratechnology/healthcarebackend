@@ -19,6 +19,8 @@ class UserRole(str, Enum):
     FAMILY = "family"
     DEVELOPER = "developer"
     SUPPORT = "support"
+    PROVIDER = "provider"
+    PATIENT = "patient"
 
 class UserDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
     full_name: Binary

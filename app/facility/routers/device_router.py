@@ -54,7 +54,7 @@ async def create_device_inventory(
         di_doc = DeviceInventory(
             facility_id=facility,
             device_type=enc_or_none(device.device_type),
-            count=enc_or_none(device.count),
+            counts=enc_or_none(device.count),
             operating_system=enc_or_none(device.operating_system),
             created_by=user,
             created_at=datetime.now(timezone.utc),

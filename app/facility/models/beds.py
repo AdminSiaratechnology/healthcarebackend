@@ -10,6 +10,7 @@ from app.facility.models.facility import Facility
 from app.facility.models.facility_rooms import FacilityRooms
 
 class Beds(Document, AutoEncryptMixin, AutoDecryptMixin):
+    facility_id: Link[Facility] | None = None
     bed_id: Binary = Field(..., description="Unique identifier for the bed")
     room_id: Link[FacilityRooms] | None = None
     designation : Binary | None = None

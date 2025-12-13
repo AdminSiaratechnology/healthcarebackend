@@ -2,10 +2,10 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from beanie import init_beanie
 from app.database.config import settings
 from app.encryption.encryption import init_encryption, ensure_data_key
-from app.accounts.models.patient import PatientDoc
+
 from app.accounts.models.user import UserDoc
 from app.accounts.models.admin import Admin
-
+from app.patients.models.patients import PatientDoc
 from app.accounts.models.password_reset import PasswordReset
 from app.facility.models.facility import Facility
 from app.facility.models.facility_branding import FacilityBranding
@@ -29,6 +29,11 @@ from app.facility.models.workflow import WorkflowDoc
 from app.facility.models.security import SecurityDoc
 from app.facility.models.quality import QualityDoc
 from app.facility.models.attachments.floor_plans import FloorPlanDoc
+from app.provider.models.providers import Provider
+from app.provider.models.practice import Practice
+from app.provider.models.clinical import clinical
+from app.provider.models.security import Security
+from app.provider.models.documents import ProviderDocuments
 
 from app.utils.audit import AuditLog
 
@@ -62,6 +67,11 @@ async def startup_app(app):
             SecurityDoc,
             QualityDoc,
             FloorPlanDoc,
+            Provider,
+            Practice,
+            clinical,
+            Security,
+            ProviderDocuments,
             Admin
         ]
         )

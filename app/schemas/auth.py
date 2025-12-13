@@ -3,6 +3,7 @@ from typing import Optional
 from datetime import datetime
 from pydantic import field_validator
 from app.schemas.admin import AdminProfile
+from app.schemas.provider.basic import BasicInfo
 
 class LoginRequest(BaseModel):
     email: EmailStr
@@ -22,6 +23,8 @@ class ProfileResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     admin_profile: Optional[AdminProfile] = None
+    provider_profile: Optional[BasicInfo] = None
+    provider_profile_pic_base64: Optional[str] = None
 
 
 class EditProfileRequest(BaseModel):

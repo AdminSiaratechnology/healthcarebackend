@@ -2,10 +2,12 @@ from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Request, HTTPException, Depends, Form, UploadFile, File
+from beanie import PydanticObjectId
 from pydantic import ValidationError
 # from app.schemas.facility import FacilityPayload
 
 from app.facility.models.facility import Facility
+from app.facility.models.beds import Beds
 from app.facility.models.facility_branding import FacilityBranding
 from app.schemas.facility import FacilityCreate, BrandingInfo, StructureInfo
 
@@ -99,6 +101,11 @@ async def create_facility(
 async def get_facilities_for_user(
     request: Request,
     current_user_id: str = Depends(get_current_user_id),
+    page: int = 1,
+    page_size: int = 10,
+    facility_type: str | None = None,
+    facility_name: str | None = None,
+    street_address: str | None = None,
 ):
     try:
         user = await UserDoc.get(current_user_id)
@@ -108,13 +115,36 @@ async def get_facilities_for_user(
         facilities = await Facility.find(Facility.created_by.id == user.id).to_list()
 
         ce = request.app.client_encryption
-        result = []
+        page = 1 if page < 1 else page
+        page_size = 1 if page_size < 1 else (100 if page_size > 100 else page_size)
+
+        filtered = []
         for facility in facilities:
             data = _decrypt_json_field(ce, facility.basic)
-            result.append({
+            bi = (data or {}).get("basic_info") or {}
+            ai = (data or {}).get("address_info") or {}
+            if facility_type and str(bi.get("facility_type", "")).lower() != facility_type.lower():
+                continue
+            if facility_name and facility_name.lower() not in str(bi.get("facility_name", "")).lower():
+                continue
+            if street_address and street_address.lower() not in str(ai.get("street_address", "")).lower():
+                continue
+            filtered.append((facility, bi, ai))
+
+        total = len(filtered)
+        start = (page - 1) * page_size
+        end = start + page_size
+
+        items = []
+        for facility, bi, ai in filtered[start:end]:
+            count_link = await Beds.find(Beds.facility_id.id == facility.id).count()
+            count_str = await Beds.find(Beds.facility_id == str(facility.id)).count()
+            total_beds = count_link + count_str
+            items.append({
                 "id": str(facility.id),
-                "basic_info": (data or {}).get("basic_info"),
-                "address_info": (data or {}).get("address_info"),
+                "basic_info": bi,
+                "address_info": ai,
+                "total_beds": total_beds,
                 "created_at": facility.created_at,
                 "updated_at": facility.updated_at,
             })
@@ -129,7 +159,13 @@ async def get_facilities_for_user(
             notes=f"Facilities fetched by {current_user_id}"
         )
 
-        return result
+        return {
+            "items": items,
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "total_pages": ((total + page_size - 1) // page_size),
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -144,165 +180,74 @@ async def get_facilities_for_user(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# @router.get("/facility")
-# async def get_facility_for_creator(request: Request, current_user_id: str = Depends(get_current_user_id)):
-#     try:
-#         facilities = await Facility.find(Facility.created_by_id == str(current_user_id)).to_list()
-#         if not facilities:
-#             raise HTTPException(status_code=404, detail="Facility not found")
+@router.get("/{facility_id}")
+async def get_facility_by_id(
+    facility_id: str,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    try:
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
 
-#         result = []
-#         for facility in facilities:
-#             ce = request.app.client_encryption
-#             basic_doc = await BasicDoc.find_one(BasicDoc.facility.id == facility.id)
-#             address_doc = await AddressDoc.find_one(AddressDoc.facility.id == facility.id)
-#             contacts_doc = await ContactsDoc.find_one(ContactsDoc.facility.id == facility.id)
-#             branding_doc = await BrandingDoc.find_one(BrandingDoc.facility.id == facility.id)
-#             structure_doc = await StructureDoc.find_one(StructureDoc.facility.id == facility.id)
-#             rooms_beds_doc = await RoomsBedsDoc.find_one(RoomsBedsDoc.facility.id == facility.id)
-#             key_contacts_doc = await KeyContactsDoc.find_one(KeyContactsDoc.facility.id == facility.id)
-#             partners_doc = await PartnersDoc.find_one(PartnersDoc.facility.id == facility.id)
-#             workstations_doc = await WorkstationsDoc.find_one(WorkstationsDoc.facility.id == facility.id)
-#             interop_doc = await InteroperabilityDoc.find_one(InteroperabilityDoc.facility.id == facility.id)
-#             regulatory_doc = await RegulatoryDoc.find_one(RegulatoryDoc.facility.id == facility.id)
+        try:
+            obj_id = PydanticObjectId(facility_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid Facility ID format")
 
-#             result.append({
-#                 "id": str(facility.id),
-#                 "created_by_id": facility.created_by_id,
-#                 "basic": _decrypt_json_field(ce, basic_doc.data) if basic_doc else None,
-#                 "address": _decrypt_json_field(ce, address_doc.data) if address_doc else None,
-#                 "contacts": _decrypt_json_field(ce, contacts_doc.data) if contacts_doc else None,
-#                 "branding": _decrypt_json_field(ce, branding_doc.data) if branding_doc else None,
-#                 "structure": _decrypt_json_field(ce, structure_doc.data) if structure_doc else None,
-#                 "rooms_beds": _decrypt_json_field(ce, rooms_beds_doc.data) if rooms_beds_doc else None,
-#                 "key_contacts": _decrypt_json_field(ce, key_contacts_doc.data) if key_contacts_doc else None,
-#                 "partners": _decrypt_json_field(ce, partners_doc.data) if partners_doc else None,
-#                 "workstations": _decrypt_json_field(ce, workstations_doc.data) if workstations_doc else None,
-#                 "interoperability": _decrypt_json_field(ce, interop_doc.data) if interop_doc else None,
-#                 "regulatory": _decrypt_json_field(ce, regulatory_doc.data) if regulatory_doc else None,
-#                 "created_at": facility.created_at,
-#                 "updated_at": facility.updated_at,
-#             })
+        facility = await Facility.get(obj_id)
+        if not facility:
+            raise HTTPException(status_code=404, detail="Facility not found")
 
-#         return result
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-    
+        # Role-based access: admin/super_admin can access any facility
+        ce = request.app.client_encryption
+        role_val = None
+        if user.role is not None:
+            try:
+                r = decrypt_value(ce, user.role)
+                role_val = r.decode("utf-8") if isinstance(r, (bytes, bytearray)) else r
+            except Exception:
+                role_val = None
 
-# @router.post("/facility/{facility_id}/partners")
-# async def save_partners(
-#     facility_id: str,
-#     request: Request,
-#     partners: str = Form("[]"),
-#     current_user_id: str = Depends(get_current_user_id),
-# ):
-#     try:
-#         facility = await Facility.get(facility_id)
-#         if not facility or facility.created_by_id != str(current_user_id):
-#             raise HTTPException(status_code=404, detail="Facility not found")
-#         ce = request.app.client_encryption
-#         dek = request.app.dek_id
-#         partners_list = json.loads(partners or "[]")
-#         enc = encrypt_value(ce, dek, json.dumps(partners_list))
-#         existing = await PartnersDoc.find_one(PartnersDoc.facility.id == facility.id)
-#         if existing:
-#             existing.data = enc
-#             await existing.save()
-#         else:
-#             await PartnersDoc(facility=facility, data=enc).insert()
-#         return {"id": facility_id}
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
+        is_admin = role_val in {"admin", "super_admin"}
+        owner_id = getattr(facility.created_by, "id", None)
+        if not is_admin and owner_id is not None and owner_id != user.id:
+            raise HTTPException(status_code=403, detail="Forbidden")
 
+        data = _decrypt_json_field(ce, facility.basic)
+        bi = (data or {}).get("basic_info") or {}
+        ai = (data or {}).get("address_info") or {}
 
-# @router.post("/facility/{facility_id}/workstations")
-# async def save_workstations(
-#     facility_id: str,
-#     request: Request,
-#     workstations: str = Form("[]"),
-#     current_user_id: str = Depends(get_current_user_id),
-# ):
-#     try:
-#         facility = await Facility.get(facility_id)
-#         if not facility or facility.created_by_id != str(current_user_id):
-#             raise HTTPException(status_code=404, detail="Facility not found")
-#         ce = request.app.client_encryption
-#         dek = request.app.dek_id
-#         ws_list = json.loads(workstations or "[]")
-#         enc = encrypt_value(ce, dek, json.dumps(ws_list))
-#         existing = await WorkstationsDoc.find_one(WorkstationsDoc.facility.id == facility.id)
-#         if existing:
-#             existing.data = enc
-#             await existing.save()
-#         else:
-#             await WorkstationsDoc(facility=facility, data=enc).insert()
-#         return {"id": facility_id}
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
+       
 
+        await log_audit(
+            request=request,
+            user_id=current_user_id,
+            action="READ",
+            resource="facility",
+            resource_id=str(facility.id),
+            status="success",
+            notes=f"Facility fetched by {current_user_id}"
+        )
 
-# @router.post("/facility/{facility_id}/interoperability")
-# async def save_interoperability(
-#     facility_id: str,
-#     request: Request,
-#     interoperability: str = Form(None),
-#     current_user_id: str = Depends(get_current_user_id),
-# ):
-#     try:
-#         facility = await Facility.get(facility_id)
-#         if not facility or facility.created_by_id != str(current_user_id):
-#             raise HTTPException(status_code=404, detail="Facility not found")
-#         ce = request.app.client_encryption
-#         dek = request.app.dek_id
-#         interop_obj = json.loads(interoperability) if interoperability else {}
-#         enc = encrypt_value(ce, dek, json.dumps(interop_obj))
-#         existing = await InteroperabilityDoc.find_one(InteroperabilityDoc.facility.id == facility.id)
-#         if existing:
-#             existing.data = enc
-#             await existing.save()
-#         else:
-#             await InteroperabilityDoc(facility=facility, data=enc).insert()
-#         return {"id": facility_id}
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
-# @router.post("/facility/{facility_id}/regulatory")
-# async def save_regulatory(
-#     facility_id: str,
-#     request: Request,
-#     regulatory: str = Form(None),
-#     current_user_id: str = Depends(get_current_user_id),
-# ):
-#     try:
-#         facility = await Facility.get(facility_id)
-#         if not facility or facility.created_by_id != str(current_user_id):
-#             raise HTTPException(status_code=404, detail="Facility not found")
-#         ce = request.app.client_encryption
-#         dek = request.app.dek_id
-#         reg_obj = json.loads(regulatory) if regulatory else {}
-#         enc = encrypt_value(ce, dek, json.dumps(reg_obj))
-#         existing = await RegulatoryDoc.find_one(RegulatoryDoc.facility.id == facility.id)
-#         if existing:
-#             existing.data = enc
-#             await existing.save()
-#         else:
-#             await RegulatoryDoc(facility=facility, data=enc).insert()
-#         return {"id": facility_id}
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
-UPLOAD_DIR_FACILITY_LOGOS = "./uploads/facility_logos"
-os.makedirs(UPLOAD_DIR_FACILITY_LOGOS, exist_ok=True)
-
-
+        return {
+            "id": str(facility.id),
+            "basic_info": bi,
+            "address_info": ai,
+            "created_at": facility.created_at,
+            "updated_at": facility.updated_at,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        await log_audit(
+            request=request,
+            user_id=current_user_id,
+            action="READ",
+            resource="facility",
+            resource_id=facility_id,
+            status="failed",
+            notes=str(e)
+        )
+        raise HTTPException(status_code=500, detail=str(e))

@@ -30,12 +30,15 @@ from app.schemas.auth import (
 from app.schemas.admin import AdminProfile
 from app.accounts.models.user import UserDoc
 from app.accounts.models.admin import Admin
+from app.provider.models.providers import Provider
+from app.schemas.provider.basic import BasicInfo
 from app.auth.password import verify_password, hash_password
 from app.utils.audit import log_audit
 from app.encryption.encryption import encrypt_value_deterministic, decrypt_value, encrypt_value
 from app.database.config import settings
 from app.utils.email import send_email
 from app.accounts.models.password_reset import PasswordReset
+from app.utils.s3_utils import get_bucket_name, s3_client, safe_filename, put_object, presign
 
 
 # router = APIRouter()
@@ -236,6 +239,7 @@ async def login(payload: LoginRequest, request: Request):
 
     await log_audit(
         request=request,
+        user_id = str(user.id),
         action="LOGIN",
         resource="auth",
         resource_id=str(user.id),
@@ -431,13 +435,43 @@ async def get_profile(request: Request):
     phone = _dec(user.phone)
     role_val = _dec(user.role)
 
-    # If admin, also load and decrypt admin profile
     admin_profile = None
+    provider_profile = None
+    provider_profile_pic_base64 = None
     if role_val == "admin":
         admin_doc = await Admin.find_one(Admin.user_id == str(user.id))
         if admin_doc:
             dec_admin = admin_doc.decrypt_fields(client_encryption)
             admin_profile = dec_admin.get("profile")
+    elif role_val == "provider":
+        provider_doc = await Provider.find_one(Provider.user_id == str(user.id))
+        if provider_doc:
+            dec_provider = provider_doc.decrypt_fields(client_encryption)
+            raw_profile = dec_provider.get("profile")
+            profile_dict = {}
+            if isinstance(raw_profile, (bytes, bytearray)):
+                try:
+                    profile_dict = json.loads(raw_profile.decode("utf-8"))
+                except Exception:
+                    profile_dict = {}
+            elif isinstance(raw_profile, str):
+                try:
+                    profile_dict = json.loads(raw_profile)
+                except Exception:
+                    profile_dict = {}
+            elif isinstance(raw_profile, dict):
+                profile_dict = raw_profile
+            try:
+                provider_profile = BasicInfo.model_validate(profile_dict)
+            except Exception:
+                provider_profile = None
+
+            raw_pic = dec_provider.get("profile_pic")
+            if isinstance(raw_pic, (bytes, bytearray)):
+                try:
+                    provider_profile_pic_base64 = base64.b64encode(raw_pic).decode("utf-8")
+                except Exception:
+                    provider_profile_pic_base64 = None
 
     return ProfileResponse(
         id=str(user.id),
@@ -449,6 +483,8 @@ async def get_profile(request: Request):
         created_at=user.created_at,
         updated_at=user.updated_at,
         admin_profile=admin_profile,
+        provider_profile=provider_profile,
+        provider_profile_pic_base64=provider_profile_pic_base64,
     )
 
 
@@ -545,12 +581,15 @@ async def upload_profile_photo(
     if ext not in ["png", "jpg", "jpeg", "gif", "webp"]:
         raise HTTPException(status_code=400, detail="Invalid image format")
 
-    filename = f"{uuid.uuid4()}.{ext}"
-    path = os.path.join(UPLOAD_DIR_PROFILE_PHOTOS, filename)
-    with open(path, "wb") as f:
-        f.write(await file.read())
-
-    photo_url = f"http://localhost:8000/uploads/profile_photos/{filename}"
+    data = await file.read()
+    full_name = _decrypt_to_str(client_encryption, user.full_name) or str(user.id)
+    folder = f"{full_name.strip().lower()} profile"
+    filename = safe_filename(file.filename)
+    bucket = get_bucket_name()
+    s3 = s3_client()
+    key = f"{folder}/{filename}"
+    put_object(s3, bucket, key, data, file.content_type)
+    photo_url = presign(s3, bucket, key)
 
     # Load or build admin profile
     admin_doc = await Admin.find_one(Admin.user_id == str(user.id))

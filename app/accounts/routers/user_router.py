@@ -1,10 +1,13 @@
-from fastapi import APIRouter,Request,HTTPException
+from fastapi import APIRouter,Request,HTTPException, Depends
 from app.schemas.users import Users
 from app.accounts.models.user import UserDoc, UserRole
 from app.utils.audit import log_audit
 from app.encryption.encryption import encrypt_value,decrypt_value,encrypt_value_deterministic
 from app.auth.password import hash_password
+from app.auth.deps import get_current_user_id
 from app.accounts.models.admin import Admin
+
+from beanie import PydanticObjectId
 from app.schemas.admin import (
     AdminProfile,
     PersonalProfile,
@@ -177,3 +180,4 @@ async def get_users(request: Request):
     decrypted_users = [u.decrypt_fields(client_encryption) for u in users]
 
     return {"data": decrypted_users}
+

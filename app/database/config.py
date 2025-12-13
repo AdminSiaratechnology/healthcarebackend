@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     KEY_VAULT_COLL: str
     AWS_REGION: str
     KMS_KEY_ARN: str
+    AWS_S3_BUCKET: str | None = None
     AWS_ACCESS_KEY_ID: str | None = None
     AWS_SECRET_ACCESS_KEY: str | None = None
     JWT_SECRET: str | None = None
