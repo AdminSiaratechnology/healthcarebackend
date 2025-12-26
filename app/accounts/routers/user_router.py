@@ -93,7 +93,6 @@ def _build_default_admin_profile(users: Users) -> AdminProfile:
         ),
     )
 
-
 @router.post("/users")
 async def user_registrations(users: Users, request: Request):
     try:

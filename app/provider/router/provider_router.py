@@ -11,6 +11,9 @@ from app.utils.audit import log_audit
 from fastapi import Form, UploadFile, File
 from app.auth.password import hash_password
 from enum import Enum
+from app.utils.s3_utils import s3_client, get_bucket_name, safe_filename, safe_folder_name, put_object
+from app.facility.models.facility import Facility
+from app.provider.models.practice import Practice
 
 router = APIRouter(prefix="/provider", tags=["Providers"])
 
@@ -150,15 +153,34 @@ async def create_user_and_provider(
         profile_json = json.dumps(profile_payload)
         encrypted_profile = encrypt_value(ce, dek_id, profile_json)
         encrypted_provider_role = encrypt_value(ce, dek_id, (provider_form.get("role").value if provider_form.get("role") else None))
-        encrypted_profile_pic = None
+        # ------------------------------------
+        # 3.a) Upload profile_pic and signature to S3
+        # ------------------------------------
+        s3 = s3_client()
+        bucket = get_bucket_name()
+        provider_folder = f"{safe_folder_name(full_name)}({str(user_doc.id)})"
+        encrypted_profile_pic_key = None
+        encrypted_signature_key = None
+
         if profile_pic is not None:
             file_bytes = await profile_pic.read()
             if file_bytes:
-                encrypted_profile_pic = encrypt_value(ce, dek_id, file_bytes)
+                key_profile = f"{provider_folder}/profile/{safe_filename(profile_pic.filename)}"
+                try:
+                    put_object(s3, bucket, key_profile, file_bytes, profile_pic.content_type)
+                    encrypted_profile_pic_key = encrypt_value(ce, dek_id, key_profile)
+                except Exception:
+                    encrypted_profile_pic_key = None
+
         if signature is not None:
             file_bytes = await signature.read()
             if file_bytes:
-                encrypted_profile_pic = encrypt_value(ce, dek_id, file_bytes)
+                key_signature = f"{provider_folder}/signature/{safe_filename(signature.filename)}"
+                try:
+                    put_object(s3, bucket, key_signature, file_bytes, signature.content_type)
+                    encrypted_signature_key = encrypt_value(ce, dek_id, key_signature)
+                except Exception:
+                    encrypted_signature_key = None
 
         # ------------------------------------
         # 4) Create Provider linked to user
@@ -168,8 +190,8 @@ async def create_user_and_provider(
             user_id=str(user_doc.id),
             profile=encrypted_profile,
             role=encrypted_provider_role,
-            profile_pic=encrypted_profile_pic,
-            signature=encrypted_profile_pic,
+            profile_pic=encrypted_profile_pic_key,
+            signature=encrypted_signature_key,
 
         )
         await provider_doc.insert()
@@ -219,3 +241,486 @@ async def create_user_and_provider(
 # ------------------------------------------------------------ Credentials ----------------------------------------
 
 
+def _dec(ce, val):
+    if not val:
+        return None
+    raw = decrypt_value(ce, val)
+    return raw.decode() if isinstance(raw, (bytes, bytearray)) else raw
+
+
+@router.get("/list")
+async def list_providers(
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+    search: str = "",
+    page: int = 1,
+    limit: int = 10,
+):
+    ce = getattr(request.app, "client_encryption", None)
+    if ce is None:
+        ce = init_encryption()
+        request.app.client_encryption = ce
+
+    user = await UserDoc.get(current_user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    docs = await Provider.find({}).sort("-created_at").to_list()
+
+    items = []
+    
+    q = (search or "").strip().lower()
+    q_tokens = [t for t in q.split() if t]
+
+    for p in docs:
+        try:
+            await p.fetch_links()
+        except Exception:
+            pass
+
+        u = getattr(p, "user", None)
+        uid = None
+        try:
+            if u and getattr(u, "id", None):
+                uid = str(u.id)
+            else:
+                refu = getattr(p.user, "ref", None) if getattr(p, "user", None) else None
+                uid = str(getattr(refu, "id", None)) if refu is not None else None
+        except Exception:
+            uid = None
+        if not uid:
+            uid = getattr(p, "user_id", None)
+
+        full_name = None
+        email = None
+        phone = None
+        if u and getattr(u, "full_name", None) is not None:
+            full_name = _dec(ce, u.full_name)
+            email = _dec(ce, getattr(u, "email", None))
+            phone = _dec(ce, getattr(u, "phone", None))
+        elif uid:
+            try:
+                u_doc = await UserDoc.get(uid)
+                if u_doc:
+                    full_name = _dec(ce, getattr(u_doc, "full_name", None))
+                    email = _dec(ce, getattr(u_doc, "email", None))
+                    phone = _dec(ce, getattr(u_doc, "phone", None))
+            except Exception:
+                pass
+
+        profile = None
+        try:
+            pr_raw = decrypt_value(ce, p.profile) if p.profile else None
+            if isinstance(pr_raw, (bytes, bytearray)):
+                pr_raw = pr_raw.decode()
+            profile = json.loads(pr_raw) if isinstance(pr_raw, str) else None
+        except Exception:
+            profile = None
+
+       
+        first_name = (profile or {}).get("first_name")
+        middle_name = (profile or {}).get("middle_name")
+        last_name = (profile or {}).get("last_name")
+        degree = (profile or {}).get("degree_enum")
+        speciality = (profile or {}).get("speciality")
+        subspeciality = (profile or {}).get("subspeciality")
+        
+        
+
+        if q_tokens:
+            blob = " ".join([
+                full_name or "",
+                email or "",
+                phone or "",
+                first_name or "",
+                middle_name or "",
+                last_name or "",
+                degree or "",
+                speciality or "",
+                subspeciality or "",
+                
+            ]).lower()
+            ok = all(t in blob for t in q_tokens)
+            if not ok:
+                continue
+
+        items.append({
+            "id": str(p.id),
+            "user_id": uid,
+            "full_name": full_name,
+            "email": email,
+            "phone": phone,
+            "first_name": first_name,
+            "middle_name": middle_name,
+            "last_name": last_name,
+            "degree": degree,
+            "speciality": speciality,
+            "subspeciality": subspeciality,
+            "created_at": p.created_at,
+            "updated_at": p.updated_at,
+        })
+
+    total = len(items)
+    if limit <= 0:
+        limit = 10
+    if page <= 0:
+        page = 1
+    start = (page - 1) * limit
+    end = start + limit
+    page_items = items[start:end]
+    pages = (total + limit - 1) // limit
+
+    try:
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Read",
+            resource="Provider",
+            resource_id="list",
+            status="success",
+            notes="Providers listed",
+        )
+    except Exception:
+        pass
+
+    return {
+        "providers": page_items,
+        
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "pages": pages,
+    }
+
+
+@router.get("/get/{provider_id}/")
+async def get_provider(
+    provider_id: str,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    try:
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        try:
+            prov_oid = PydanticObjectId(provider_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid provider_id")
+
+        p = await Provider.get(prov_oid)
+        if not p:
+            raise HTTPException(status_code=404, detail="Provider not found")
+
+        try:
+            await p.fetch_links()
+        except Exception:
+            pass
+
+        u = getattr(p, "user", None)
+        uid = None
+        try:
+            if u and getattr(u, "id", None):
+                uid = str(u.id)
+            else:
+                refu = getattr(p.user, "ref", None) if getattr(p, "user", None) else None
+                uid = str(getattr(refu, "id", None)) if refu is not None else None
+        except Exception:
+            uid = None
+        if not uid:
+            uid = getattr(p, "user_id", None)
+
+        full_name = None
+        email = None
+        phone = None
+        if u and getattr(u, "full_name", None) is not None:
+            full_name = _dec(ce, u.full_name)
+            email = _dec(ce, getattr(u, "email", None))
+            phone = _dec(ce, getattr(u, "phone", None))
+        elif uid:
+            try:
+                u_doc = await UserDoc.get(uid)
+                if u_doc:
+                    full_name = _dec(ce, getattr(u_doc, "full_name", None))
+                    email = _dec(ce, getattr(u_doc, "email", None))
+                    phone = _dec(ce, getattr(u_doc, "phone", None))
+            except Exception:
+                pass
+
+        profile = None
+        try:
+            pr_raw = decrypt_value(ce, p.profile) if p.profile else None
+            if isinstance(pr_raw, (bytes, bytearray)):
+                pr_raw = pr_raw.decode()
+            profile = json.loads(pr_raw) if isinstance(pr_raw, str) else None
+        except Exception:
+            profile = None
+
+        role_val = None
+        try:
+            role_val = _dec(ce, getattr(p, "role", None))
+        except Exception:
+            role_val = None
+
+        result = {
+            "id": str(p.id),
+            "user_id": uid,
+            "full_name": full_name,
+            "email": email,
+            "phone": phone,
+            "role": role_val,
+            "profile": profile,
+            "profile_pic": _dec(ce, getattr(p, "profile_pic", None)),
+            "signature": _dec(ce, getattr(p, "signature", None)),
+            "created_at": p.created_at,
+            "updated_at": p.updated_at,
+        }
+
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(user.id),
+                action="Read",
+                resource="Provider",
+                resource_id=str(p.id),
+                status="success",
+                notes="Provider fetched",
+            )
+        except Exception:
+            pass
+
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Read",
+                resource="Provider",
+                resource_id=provider_id,
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+# ------------------------------------ facility id wise fetch providers -----------------------------------
+
+
+@router.get("/list/by-facility/{facility_id}/")
+async def list_providers_by_facility(
+    facility_id: str,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+    search: str = "",
+    page: int = 1,
+    limit: int = 10,
+):
+    ce = getattr(request.app, "client_encryption", None)
+    if ce is None:
+        ce = init_encryption()
+        request.app.client_encryption = ce
+
+    user = await UserDoc.get(current_user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    facility_obj = None
+    try:
+        facility_obj_id = PydanticObjectId(facility_id)
+        facility_obj = await Facility.get(facility_obj_id)
+    except Exception:
+        facility_obj = None
+
+    if facility_obj is None:
+        try:
+            facility_obj = await Facility.get(facility_id)
+        except Exception:
+            facility_obj = None
+
+    if not facility_obj:
+        raise HTTPException(status_code=404, detail="Facility not found")
+
+    role_val = None
+    if user.role is not None:
+        try:
+            r = decrypt_value(ce, user.role)
+            role_val = r.decode("utf-8") if isinstance(r, (bytes, bytearray)) else r
+        except Exception:
+            role_val = None
+
+    is_admin = role_val in {"admin", "super_admin"}
+    if not is_admin:
+        try:
+            await facility_obj.fetch_link(Facility.created_by)
+        except Exception:
+            pass
+        owner_id = getattr(getattr(facility_obj, "created_by", None), "id", None)
+        if owner_id is not None and owner_id != user.id:
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+    docs_link = await Practice.find({"facility_ids.$id": facility_obj.id}).to_list()
+    docs_str = await Practice.find({"facility_ids": str(facility_obj.id)}).to_list()
+    primary_link = await Practice.find({"primary_facility_id.$id": facility_obj.id}).to_list()
+    primary_str = await Practice.find({"primary_facility_id": str(facility_obj.id)}).to_list()
+
+    seen_practice = set()
+    practices: list[Practice] = []
+    for d in docs_link + docs_str + primary_link + primary_str:
+        did = str(getattr(d, "id", ""))
+        if not did or did in seen_practice:
+            continue
+        seen_practice.add(did)
+        practices.append(d)
+
+    provider_ids = []
+    seen_provider = set()
+    for pr in practices:
+        pid = getattr(getattr(pr, "provider_id", None), "id", None)
+        if pid is None:
+            try:
+                pid = getattr(getattr(getattr(pr, "provider_id", None), "ref", None), "id", None)
+            except Exception:
+                pid = None
+        if pid is None:
+            continue
+        spid = str(pid)
+        if spid in seen_provider:
+            continue
+        seen_provider.add(spid)
+        provider_ids.append(pid)
+
+    providers = []
+    if provider_ids:
+        providers = await Provider.find({"_id": {"$in": provider_ids}}).sort("-created_at").to_list()
+
+    items = []
+    q = (search or "").strip().lower()
+    q_tokens = [t for t in q.split() if t]
+
+    for p in providers:
+        try:
+            await p.fetch_links()
+        except Exception:
+            pass
+
+        u = getattr(p, "user", None)
+        uid = None
+        try:
+            if u and getattr(u, "id", None):
+                uid = str(u.id)
+            else:
+                refu = getattr(p.user, "ref", None) if getattr(p, "user", None) else None
+                uid = str(getattr(refu, "id", None)) if refu is not None else None
+        except Exception:
+            uid = None
+        if not uid:
+            uid = getattr(p, "user_id", None)
+
+        full_name = None
+        email = None
+        phone = None
+        if u and getattr(u, "full_name", None) is not None:
+            full_name = _dec(ce, u.full_name)
+            email = _dec(ce, getattr(u, "email", None))
+            phone = _dec(ce, getattr(u, "phone", None))
+        elif uid:
+            try:
+                u_doc = await UserDoc.get(uid)
+                if u_doc:
+                    full_name = _dec(ce, getattr(u_doc, "full_name", None))
+                    email = _dec(ce, getattr(u_doc, "email", None))
+                    phone = _dec(ce, getattr(u_doc, "phone", None))
+            except Exception:
+                pass
+
+        profile = None
+        try:
+            pr_raw = decrypt_value(ce, p.profile) if p.profile else None
+            if isinstance(pr_raw, (bytes, bytearray)):
+                pr_raw = pr_raw.decode()
+            profile = json.loads(pr_raw) if isinstance(pr_raw, str) else None
+        except Exception:
+            profile = None
+
+        first_name = (profile or {}).get("first_name")
+        middle_name = (profile or {}).get("middle_name")
+        last_name = (profile or {}).get("last_name")
+        degree = (profile or {}).get("degree_enum")
+        speciality = (profile or {}).get("speciality")
+        subspeciality = (profile or {}).get("subspeciality")
+
+        if q_tokens:
+            blob = " ".join([
+                full_name or "",
+                email or "",
+                phone or "",
+                first_name or "",
+                middle_name or "",
+                last_name or "",
+                degree or "",
+                speciality or "",
+                subspeciality or "",
+            ]).lower()
+            ok = all(t in blob for t in q_tokens)
+            if not ok:
+                continue
+
+        items.append({
+            "id": str(p.id),
+            "user_id": uid,
+            "full_name": full_name,
+            "email": email,
+            "phone": phone,
+            "first_name": first_name,
+            "middle_name": middle_name,
+            "last_name": last_name,
+            "degree": degree,
+            "speciality": speciality,
+            "subspeciality": subspeciality,
+            "created_at": p.created_at,
+            "updated_at": p.updated_at,
+        })
+
+    total = len(items)
+    if limit <= 0:
+        limit = 10
+    if page <= 0:
+        page = 1
+    start = (page - 1) * limit
+    end = start + limit
+    page_items = items[start:end]
+    pages = (total + limit - 1) // limit
+
+    try:
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Read",
+            resource="Provider",
+            resource_id=f"facility:{str(facility_obj.id)}",
+            status="success",
+            notes="Providers fetched by facility",
+        )
+    except Exception:
+        pass
+
+    return {
+        "providers": page_items,
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "pages": pages,
+    }

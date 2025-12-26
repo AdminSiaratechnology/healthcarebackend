@@ -9,7 +9,13 @@ from app.facility.models.facility_department import FacilityDepartment
 
 from app.accounts.models.user import UserDoc
 from app.auth.deps import get_current_user_id
-from app.encryption.encryption import encrypt_value, decrypt_value
+from app.encryption.encryption import (
+    encrypt_value,
+    decrypt_value,
+    init_encryption,
+    ensure_data_key,
+    encrypt_value_deterministic,
+)
 from app.utils.audit import log_audit
 from app.schemas.facilities.department import DepartmentSchema
 from beanie import PydanticObjectId
@@ -169,3 +175,83 @@ async def get_facility_departments(
         pass
 
     return result
+
+
+@router.put("/update/department/{department_id}/")
+async def update_facility_department(
+    department_id: str,
+    department: DepartmentSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    ce = getattr(request.app, "client_encryption", None)
+    if ce is None:
+        ce = init_encryption()
+        request.app.client_encryption = ce
+    dek_id = getattr(request.app, "dek_id", None)
+    if dek_id is None:
+        dek_id = ensure_data_key()
+        request.app.dek_id = dek_id
+
+    def enc_det_or_none(val):
+        return encrypt_value_deterministic(ce, dek_id, val) if val is not None else None
+
+    user = await UserDoc.get(current_user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    try:
+        dept_obj_id = PydanticObjectId(department_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid Department ID format")
+
+    dept_doc = await FacilityDepartment.get(dept_obj_id)
+    if not dept_doc:
+        raise HTTPException(status_code=404, detail="Department not found")
+
+    current_code = _decrypt_value(ce, dept_doc.code)
+    current_name = _decrypt_value(ce, dept_doc.department_name)
+    current_type = _decrypt_value(ce, dept_doc.type)
+    current_desc = _decrypt_value(ce, dept_doc.description)
+
+    new_code = department.code if department.code is not None else current_code
+    new_name = department.name if department.name is not None else current_name
+    new_type = (department.type.value if department.type else None) if department.type is not None else current_type
+    new_desc = department.description if department.description is not None else current_desc
+
+    if new_code is None and new_name is None and new_type is None and new_desc is None:
+        raise HTTPException(status_code=400, detail="No fields provided for update")
+
+    dept_doc.code = enc_det_or_none(new_code)
+    dept_doc.department_name = enc_det_or_none(new_name)
+    dept_doc.type = enc_det_or_none(new_type)
+    dept_doc.description = enc_det_or_none(new_desc)
+    dept_doc.updated_at = datetime.now(timezone.utc)
+    await dept_doc.save()
+
+    try:
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Update",
+            resource="Facility Department",
+            resource_id=str(dept_doc.id),
+            status="success",
+            notes="Facility department updated successfully",
+        )
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "id": str(dept_doc.id),
+        "code": new_code,
+        "department_name": new_name,
+        "type": new_type,
+        "description": new_desc,
+        "updated_at": dept_doc.updated_at,
+    }
+
+
+
+

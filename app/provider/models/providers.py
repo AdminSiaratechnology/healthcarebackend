@@ -26,3 +26,4 @@ class Provider(Document, AutoDecryptMixin, AutoEncryptMixin):
 
     class Settings:
         name = "providers"
+        indexes = ["created_at"]

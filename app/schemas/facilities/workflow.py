@@ -33,11 +33,6 @@ class ClinicalProtocols(BaseModel):
 
 
 
-class TransportVendor(BaseModel):
-    vendor_name: Optional[str] = None
-    contact_number: Optional[str] = None
-   
-
 
 class VaccineRules(BaseModel):
     visitation_policy: Optional[str] = None
@@ -48,6 +43,6 @@ class FacilityWorkflowSchema(BaseModel):
     documentation_workflow: Optional[DocumentationWorkflow] = None
     billing_workflow: Optional[BillingWorkflow] = None
     clinical_protocols: Optional[ClinicalProtocols] = None
-    transport_vendors: List[TransportVendor] = Field(default_factory=list)
+    # transport_vendors: List[TransportVendor] = Field(default_factory=list)
     vaccine_rules: Optional[VaccineRules] = None
 

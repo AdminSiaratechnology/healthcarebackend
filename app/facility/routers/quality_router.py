@@ -58,7 +58,7 @@ async def create_quality(
             enable_quality_measure=enc_or_none(quality.enable_quality_measure),
             enable_infection_control_tracking=enc_or_none(quality.enable_infection_control_tracking),
             fall_risk_program=enc_or_none(quality.fall_risk_program),
-            quality_reporting=enc_json_or_none(quality.quality_reporting),
+            # quality_reporting=enc_json_or_none(quality.quality_reporting),
             created_by=user,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -163,7 +163,6 @@ async def get_quality_settings(
             "enable_quality_measure": _decrypt_value(ce, q.enable_quality_measure),
             "enable_infection_control_tracking": _decrypt_value(ce, q.enable_infection_control_tracking),
             "fall_risk_program": _decrypt_value(ce, q.fall_risk_program),
-            "quality_reporting": _decrypt_json_field(ce, q.quality_reporting),
             "created_at": q.created_at,
             "updated_at": q.updated_at,
         } for q in docs

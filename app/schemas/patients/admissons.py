@@ -30,7 +30,7 @@ class PatientAdmissionSchema(BaseModel):
     admission_location : Optional[str] = None
     resident_number : Optional[str] = None
     admission_type : AdmissionTypeEnum
-    status : PatientStatus.Active   
+    status : PatientStatus = PatientStatus.Active   
     admitted_form : AdmittedForm
     from_date : date
     to_date : date

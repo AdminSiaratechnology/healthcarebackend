@@ -1,6 +1,7 @@
 from fastapi import HTTPException
 from app.database.config import settings
 import boto3
+from botocore.config import Config
 import uuid
 
 
@@ -13,7 +14,7 @@ def get_bucket_name():
 
 def s3_client():
     region = settings.AWS_REGION
-    kwargs = {"region_name": region}
+    kwargs = {"region_name": region, "config": Config(signature_version="s3v4")}
     if settings.AWS_ACCESS_KEY_ID and settings.AWS_SECRET_ACCESS_KEY:
         kwargs["aws_access_key_id"] = settings.AWS_ACCESS_KEY_ID
         kwargs["aws_secret_access_key"] = settings.AWS_SECRET_ACCESS_KEY

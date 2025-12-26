@@ -188,3 +188,79 @@ async def get_beds(
         pass
 
     return result
+
+
+@router.get("/get/bed/by-room/{room_id}/")
+async def get_beds_by_room(
+    room_id: str,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    user = await UserDoc.get(current_user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    room_obj = None
+    try:
+        room_obj_id = PydanticObjectId(room_id)
+        room_obj = await FacilityRooms.get(room_obj_id)
+    except Exception:
+        pass
+
+    if room_obj is None:
+        room_obj = await FacilityRooms.get(room_id)
+    if not room_obj:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    ce = request.app.client_encryption
+
+    beds_by_link = await Beds.find(Beds.room_id.id == room_obj.id).to_list()
+    beds_by_str = await Beds.find(Beds.room_id == str(room_obj.id)).to_list()
+
+    seen = set()
+    beds = []
+    for b in beds_by_link + beds_by_str:
+        if str(b.id) in seen:
+            continue
+        seen.add(str(b.id))
+        beds.append(b)
+
+    async def _safe_room_id(bed_doc):
+        if not bed_doc.room_id:
+            return None
+        if hasattr(bed_doc.room_id, "fetch"):
+            try:
+                return str((await bed_doc.room_id.fetch()).id)
+            except Exception:
+                pass
+        return str(getattr(bed_doc.room_id, "id", bed_doc.room_id))
+
+    result = [
+        {
+            "id": str(b.id),
+            "bed_id": _decrypt_value(ce, b.bed_id),
+            "designation": _decrypt_value(ce, b.designation),
+            "status": _decrypt_value(ce, b.status),
+            "bariatric": _decrypt_value(ce, b.bariatric),
+            "room_id": await _safe_room_id(b),
+            "last_sanitized": b.last_sanitized,
+            "bed_policy": _decrypt_value(ce, b.bed_policy),
+            "created_at": b.created_at,
+            "updated_at": b.updated_at,
+        } for b in beds
+    ]
+
+    try:
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Read",
+            resource="Bed",
+            resource_id=str(room_obj.id),
+            status="success",
+            notes="Beds fetched successfully by room",
+        )
+    except Exception:
+        pass
+
+    return result

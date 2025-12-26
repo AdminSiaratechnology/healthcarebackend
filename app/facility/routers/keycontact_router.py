@@ -70,8 +70,7 @@ async def create_key_contacts(
             medical_director=enc_json_or_none(contacts.medical_director),
             admission_coordinator=enc_json_or_none(contacts.admission_coordinator),
             it_administrator=enc_json_or_none(contacts.it_administrator),
-            charge_nurse=enc_json_or_none(contacts.charge_nurse),
-            emergency_contact=enc_json_or_none(contacts.emergency_contact),
+           
             created_by=user,
         )
 
@@ -157,8 +156,6 @@ async def get_key_contacts(
             "medical_director": _decrypt_json_field(ce, kc.medical_director),
             "admission_coordinator": _decrypt_json_field(ce, kc.admission_coordinator),
             "it_administrator": _decrypt_json_field(ce, kc.it_administrator),
-            "charge_nurse": _decrypt_json_field(ce, kc.charge_nurse),
-            "emergency_contact": _decrypt_json_field(ce, kc.emergency_contact),
             "created_at": kc.created_at,
             "updated_at": kc.updated_at,
         } for kc in docs

@@ -34,14 +34,14 @@ class Marital_status(str, Enum):
     widowd = "Widowed"
 
 class PersonalInfo(BaseModel):
-    facility_id: str
+   
     first_name:  Optional[str] = None
     middle_name :  Optional[str] = None
     last_name :  Optional[str] = None
     preferred_name :  Optional[str] = None
     maiden_name:  Optional[str] = None
     birth_place: Optional[str] = None
-    dob : date
+    dob : date = None
     gender : Optional[genderEnum] = None
     race : Optional[RaceEnum] = None
     primary_language: Optional[Primary_language] = None
@@ -53,4 +53,10 @@ class ContactInformation(BaseModel):
     phone_number : Optional[str] = None
     email : Optional[EmailStr] = None
     password : Optional[str] = None
+
+
+class PatientSchema(BaseModel):
+    provider_id : str
+    personal_information : Optional[PersonalInfo] = None
+    contact_information : Optional[ContactInformation] = None
     

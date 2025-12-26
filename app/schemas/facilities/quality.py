@@ -26,4 +26,4 @@ class QualitySchema(BaseModel):
     enable_quality_measure: bool = False
     enable_infection_control_tracking: bool = False
     fall_risk_program: bool = False
-    quality_reporting: Optional[QualityReporting] = None
+    # quality_reporting: Optional[QualityReporting] = None

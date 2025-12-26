@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from fastapi import APIRouter, Request, HTTPException, Depends, Form, UploadFile, File
 from pydantic import ValidationError
 from app.facility.models.facility import Facility
@@ -9,7 +9,8 @@ from app.encryption.encryption import encrypt_value, decrypt_value, init_encrypt
 from app.auth.password import hash_password
 from app.accounts.models.user import UserRole
 from app.utils.audit import log_audit
-from app.schemas.patients.personal import PersonalInfo,ContactInformation
+from app.schemas.patients.personal import PatientSchema, PersonalInfo, ContactInformation
+from app.provider.models.providers import Provider
 from beanie import PydanticObjectId
 import json
 import os
@@ -24,11 +25,20 @@ def _decrypt_value(client_encryption, encrypted_val):
     raw = decrypt_value(client_encryption, encrypted_val)
     return raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw
 
+def _decrypt_json_field(client_encryption, encrypted_val):
+    val = _decrypt_value(client_encryption, encrypted_val)
+    if not val:
+        return None
+    try:
+        return json.loads(val) if isinstance(val, str) else val
+    except Exception:
+        return None
 
-@router.post("/create/")
+
+@router.post("/create/{facility_id}/")
 async def create_patient(
-    personal: PersonalInfo,
-    contact: ContactInformation,
+    facility_id: str,
+    schema: PatientSchema,
     request: Request,
     current_user_id: str = Depends(get_current_user_id),
 ):
@@ -42,13 +52,15 @@ async def create_patient(
             dek_id = ensure_data_key()
             request.app.dek_id = dek_id
 
-        if not getattr(personal, "facility_id", None):
-            raise HTTPException(status_code=400, detail="facility_id is required in body")
+        fac_obj = None
         try:
-            fac_oid = PydanticObjectId(personal.facility_id)
+            fac_oid = PydanticObjectId(facility_id)
+            fac_obj = await Facility.get(fac_oid)
         except Exception:
-            raise HTTPException(status_code=400, detail="Invalid Facility ID format")
-        facility = await Facility.get(fac_oid)
+            pass
+        if fac_obj is None:
+            fac_obj = await Facility.get(facility_id)
+        facility = fac_obj
         if not facility:
             raise HTTPException(status_code=404, detail="Facility not found")
 
@@ -59,14 +71,39 @@ async def create_patient(
         phone = _decrypt_value(ce, user.phone)
         email = _decrypt_value(ce, user.email)
 
-        personal_data = personal.model_dump(mode="json", serialize_as_any=True)
-        contact_input = contact.model_dump(mode="json", serialize_as_any=True) if contact else {}
+        raw_body = {}
+        try:
+            raw_body = await request.json()
+        except Exception:
+            raw_body = {}
+        personal_data = schema.personal_information.model_dump(mode="json", serialize_as_any=True) if schema.personal_information else {}
+        if not personal_data:
+            pi_alt = raw_body.get("personal") or raw_body.get("personal_information") or {}
+            if isinstance(pi_alt, dict):
+                personal_data = pi_alt
+        
+        contact_input = schema.contact_information.model_dump(mode="json", serialize_as_any=True) if schema.contact_information else {}
+        if not contact_input:
+            ci_alt = raw_body.get("contact") or raw_body.get("contact_information") or {}
+            if isinstance(ci_alt, dict):
+                contact_input = ci_alt
         if not contact_input.get("phone_number"):
             contact_input["phone_number"] = phone
         if not contact_input.get("email"):
-            contact_input["email"] = email
+            contact_input["email"] = email             
 
-        full_name = " ".join([p for p in [personal.first_name, personal.middle_name, personal.last_name] if p]).strip() or (personal.preferred_name or "Patient")
+        pi = schema.personal_information
+        name_parts = []
+        if pi:
+            for p in [pi.first_name, pi.middle_name, pi.last_name]:
+                if p:
+                    name_parts.append(p)
+        else:
+            for p in [personal_data.get("first_name"), personal_data.get("middle_name"), personal_data.get("last_name")]:
+                if p:
+                    name_parts.append(p)
+        preferred = pi.preferred_name if pi and getattr(pi, "preferred_name", None) else personal_data.get("preferred_name")
+        full_name = " ".join(name_parts).strip() or (preferred or "Patient")
         enc_full_name = encrypt_value(ce, dek_id, full_name)
         enc_email = encrypt_value_deterministic(ce, dek_id, contact_input.get("email")) if contact_input.get("email") else None
         enc_phone = encrypt_value_deterministic(ce, dek_id, contact_input.get("phone_number")) if contact_input.get("phone_number") else None
@@ -87,16 +124,27 @@ async def create_patient(
             "personal": personal_data,
             "contact": contact_input,
         }
+        
         enc_info = encrypt_value(ce, dek_id, json.dumps(payload))
+
+        provider_obj = None
+        if schema.provider_id:
+            try:
+                prov_oid = PydanticObjectId(schema.provider_id)
+                provider_obj = await Provider.get(prov_oid)
+            except Exception:
+                provider_obj = await Provider.get(schema.provider_id)
 
         doc = PatientDoc(
             facility_id=facility,
+            provider_id=provider_obj,
             user_id=patient_user,
             personal_information=enc_info,
             created_by=user,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
+       
         await doc.insert()
 
         await log_audit(
@@ -109,7 +157,7 @@ async def create_patient(
             notes="Patient created",
         )
 
-        return {"id": str(doc.id), "user_id": str(patient_user.id)}
+        return {"id": str(doc.id), "user_id": str(patient_user.id), "provider_id": str(provider_obj.id) if provider_obj else None}
     except HTTPException:
         raise
     except Exception as e:
@@ -124,10 +172,9 @@ async def create_patient(
         )
         raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.get("/get/{facility_id}/")
-async def get_patients(
-    facility_id: str,
+@router.get("/get/{patient_id}/")
+async def get_patient(
+    patient_id: str,
     request: Request,
     current_user_id: str = Depends(get_current_user_id),
 ):
@@ -141,55 +188,120 @@ async def get_patients(
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        fac_obj = None
         try:
-            fac_oid = PydanticObjectId(facility_id)
-            fac_obj = await Facility.get(fac_oid)
+            p_oid = PydanticObjectId(patient_id)
         except Exception:
-            pass
-        if fac_obj is None:
-            fac_obj = await Facility.get(facility_id)
-        if not fac_obj:
-            raise HTTPException(status_code=404, detail="Facility not found")
+            raise HTTPException(status_code=400, detail="Invalid Patient ID format")
+        doc = await PatientDoc.get(p_oid)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        
 
-        by_link = await PatientDoc.find(PatientDoc.facility_id.id == fac_obj.id).to_list()
-        by_str = await PatientDoc.find(PatientDoc.facility_id == str(fac_obj.id)).to_list()
-
-        seen = set()
-        docs = []
-        for d in by_link + by_str:
-            if str(d.id) in seen:
-                continue
-            seen.add(str(d.id))
-            docs.append(d)
-
-        result = []
-        for p in docs:
-            raw = _decrypt_value(ce, p.personal_information)
-            info = {}
+        
+        fac_id = None
+        if doc.facility_id:
             try:
-                info = json.loads(raw) if isinstance(raw, str) else {}
+                fac_doc = await doc.facility_id.fetch()
+                fac_id = str(fac_doc.id)
             except Exception:
-                info = {}
-            result.append({
-                "id": str(p.id),
-                "personal": info.get("personal"),
-                "contact": info.get("contact"),
-                "created_at": p.created_at,
-                "updated_at": p.updated_at,
-            })
+                try:
+                    fac_id = str(getattr(doc.facility_id, "id"))
+                except Exception:
+                    fac_id = None
+
+        prov_id = None
+        if doc.provider_id:
+            try:
+                prov_doc = await doc.provider_id.fetch()
+                prov_id = str(prov_doc.id)
+            except Exception:
+                try:
+                    prov_id = str(getattr(doc.provider_id, "id"))
+                except Exception:
+                    prov_id = None
+
+        usr_id = None
+        if doc.user_id:
+            try:
+                usr_doc = await doc.user_id.fetch()
+                usr_id = str(usr_doc.id)
+            except Exception:
+                try:
+                    usr_id = str(getattr(doc.user_id, "id"))
+                except Exception:
+                    usr_id = None
+
+        personal_payload = _decrypt_json_field(ce, doc.personal_information)
+        print("sooooooooooooooooooooooooooooooo",personal_payload)
+        personal_info = (personal_payload or {}).get("personal") or {}
+        contact_info = (personal_payload or {}).get("contact") or {}
+
+        if not personal_info and doc.user_id:
+            try:
+                udoc = await doc.user_id.fetch()
+                display_name = _decrypt_value(ce, udoc.full_name)
+                if display_name:
+                    personal_info = {"preferred_name": display_name}
+            except Exception:
+                pass
 
         await log_audit(
             request=request,
             user_id=str(user.id),
             action="Read",
             resource="Patient",
-            resource_id=str(fac_obj.id),
+            resource_id=str(doc.id),
             status="success",
-            notes="Patients fetched",
+            notes="Patient fetched",
         )
 
-        return result
+        try:
+            pi_model = PersonalInfo.model_validate(personal_info)
+            print("gggggggggggggggggggggggggggg",pi_model)
+        except ValidationError:
+            _d = {
+                "first_name": personal_info.get("first_name"),
+                "middle_name": personal_info.get("middle_name"),
+                "last_name": personal_info.get("last_name"),
+                "preferred_name": personal_info.get("preferred_name"),
+                "maiden_name": personal_info.get("maiden_name"),
+                "birth_place": personal_info.get("birth_place"),
+                "dob": None,
+                "gender": personal_info.get("gender"),
+                "race": personal_info.get("race"),
+                "primary_language": personal_info.get("primary_language"),
+                "marital_status": personal_info.get("marital_status"),
+                "religion": personal_info.get("religion"),
+            }
+            _dob_val = personal_info.get("dob")
+            if isinstance(_dob_val, str):
+                try:
+                    _d["dob"] = date.fromisoformat(_dob_val)
+                except Exception:
+                    _d["dob"] = None
+            elif isinstance(_dob_val, date):
+                _d["dob"] = _dob_val
+            if not _d.get("preferred_name") and doc.user_id:
+                try:
+                    _udoc = await doc.user_id.fetch()
+                    _name = _decrypt_value(ce, _udoc.full_name)
+                    if _name:
+                        _d["preferred_name"] = _name
+                except Exception:
+                    pass
+            pi_model = PersonalInfo.model_construct(**_d)
+        ci_model = ContactInformation.model_validate(contact_info)
+
+        return {
+            "id": str(doc.id),
+            "facility_id": fac_id,
+            "provider_id": prov_id,
+            "user_id": usr_id,
+            "personal_information": pi_model.model_dump(mode="json", serialize_as_any=True),
+            "contact_information": ci_model.model_dump(mode="json", serialize_as_any=True),
+            "created_at": doc.created_at,
+            "updated_at": doc.updated_at,
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -198,8 +310,157 @@ async def get_patients(
             user_id=current_user_id,
             action="Read",
             resource="Patient",
-            resource_id=facility_id,
+            resource_id=patient_id,
             status="failed",
             notes=str(e),
         )
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/list/")
+async def list_patients(
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+    search: str = "",
+    page: int = 1,
+    limit: int = 10,
+):
+    try:
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        by_link = await PatientDoc.find(PatientDoc.created_by.id == user.id).sort("-created_at").to_list()
+        by_str = await PatientDoc.find(PatientDoc.created_by == str(user.id)).sort("-created_at").to_list()
+
+        seen = set()
+        docs: list[PatientDoc] = []
+        for d in by_link + by_str:
+            did = str(getattr(d, "id", ""))
+            if not did or did in seen:
+                continue
+            seen.add(did)
+            docs.append(d)
+
+        q = (search or "").strip().lower()
+        q_tokens = [t for t in q.split() if t]
+
+        items = []
+        for doc in docs:
+            full_name = None
+            usr_id = None
+            if doc.user_id:
+                try:
+                    usr_doc = await doc.user_id.fetch()
+                    usr_id = str(usr_doc.id)
+                    full_name = _decrypt_value(ce, getattr(usr_doc, "full_name", None))
+                except Exception:
+                    try:
+                        usr_id = str(getattr(doc.user_id, "id"))
+                    except Exception:
+                        usr_id = None
+
+            personal_payload = _decrypt_json_field(ce, doc.personal_information) or {}
+            personal_info = (personal_payload or {}).get("personal") or {}
+
+            first_name = personal_info.get("first_name")
+            middle_name = personal_info.get("middle_name")
+            last_name = personal_info.get("last_name")
+
+            if q_tokens:
+                blob = " ".join([
+                    full_name or "",
+                    first_name or "",
+                    middle_name or "",
+                    last_name or "",
+                ]).lower()
+                ok = all(t in blob for t in q_tokens)
+                if not ok:
+                    continue
+
+            fac_id = None
+            if doc.facility_id:
+                try:
+                    fac_doc = await doc.facility_id.fetch()
+                    fac_id = str(fac_doc.id)
+                except Exception:
+                    try:
+                        fac_id = str(getattr(doc.facility_id, "id"))
+                    except Exception:
+                        fac_id = None
+
+            prov_id = None
+            if doc.provider_id:
+                try:
+                    prov_doc = await doc.provider_id.fetch()
+                    prov_id = str(prov_doc.id)
+                except Exception:
+                    try:
+                        prov_id = str(getattr(doc.provider_id, "id"))
+                    except Exception:
+                        prov_id = None
+
+            items.append({
+                "id": str(doc.id),
+                "facility_id": fac_id,
+                "provider_id": prov_id,
+                "user_id": usr_id,
+                "full_name": full_name,
+                "first_name": first_name,
+                "middle_name": middle_name,
+                "last_name": last_name,
+                "created_at": doc.created_at,
+                "updated_at": doc.updated_at,
+            })
+
+        total = len(items)
+        if limit <= 0:
+            limit = 10
+        if page <= 0:
+            page = 1
+        start = (page - 1) * limit
+        end = start + limit
+        page_items = items[start:end]
+        pages = (total + limit - 1) // limit
+
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(user.id),
+                action="Read",
+                resource="Patient",
+                resource_id=f"list:created_by:{str(user.id)}",
+                status="success",
+                notes="Patients listed",
+            )
+        except Exception:
+            pass
+
+        return {
+            "patients": page_items,
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "pages": pages,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await log_audit(
+                request=request,
+                user_id=current_user_id,
+                action="Read",
+                resource="Patient",
+                resource_id=f"list:created_by:{current_user_id}",
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
         raise HTTPException(status_code=500, detail=str(e))

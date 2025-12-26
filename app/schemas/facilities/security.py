@@ -34,13 +34,7 @@ class PrivacyOfficerInfo(BaseModel):
     email: Optional[str] = None
     contact_number: Optional[str] = None
 
-
-class BreachContacts(BaseModel):
-    name : Optional[str] = None
-    Role : Optional[str] = None
-    phone : Optional[str] = None
-    email : Optional[str] = None
-    
+ 
 
 
 class SecuritySchema(BaseModel):
@@ -49,4 +43,4 @@ class SecuritySchema(BaseModel):
     phi_export_settings: Optional[phiExportSettings] = None
     break_glass_audit: Optional[BreakGlassAudit] = None
     privacy_officer_info: Optional[PrivacyOfficerInfo] = None
-    breach_contacts: List[BreachContacts] = Field(default_factory=list)
+    # breach_contacts: List[BreachContacts] = Field(default_factory=list)

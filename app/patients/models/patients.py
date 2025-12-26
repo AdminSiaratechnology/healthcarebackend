@@ -7,9 +7,11 @@ from app.accounts.models.user import UserDoc
 from app.encryption.decrypt_mixin import AutoDecryptMixin
 from app.encryption.encrypt_mixin import AutoEncryptMixin
 from app.facility.models.facility import Facility
+from app.provider.models.providers import Provider
 
 class PatientDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
     facility_id: Link["Facility"] | None = None
+    provider_id : Link["Provider"] | None = None
     user_id : Link[UserDoc] | None = None
     personal_information : Binary | None = None
     created_by: Link[UserDoc] | None = None

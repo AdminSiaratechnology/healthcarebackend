@@ -19,16 +19,37 @@ from app.facility.routers.work_station_router import router as work_station_rout
 from app.facility.routers.device_router import router as device_router
 from app.facility.routers.interoperability_router import router as interoperability_router
 from app.facility.routers.regulatory_router import router as regulatory_router
+from app.facility.routers.accerditations_router import router as accerditations_router
+from app.facility.routers.state_reporting_identifiers_router import router as state_reporting_identifiers_router
 from app.facility.routers.standards_router import router as standards_router
 from app.facility.routers.workflow_router import router as workflow_router
+from app.facility.routers.transport_vendor_router import router as transport_vendor_router
 from app.facility.routers.security_router import router as security_router
+from app.facility.routers.breach_contact import router as breach_contact
 from app.facility.routers.quality_router import router as quality_router
+from app.facility.routers.quality_reporting_router import router as quality_reporting_router
 from app.provider.router.provider_router import router as provider_router
 from app.provider.router.practice_router import router as practice_router
 from app.provider.router.clinical_router import router as clinical_router
 from app.provider.router.security_router import router as provider_security_router
 from app.provider.router.provider_documents_router import router as provider_documents_router
 from app.patients.routers.patient_router import router as patient_router
+from app.patients.routers.patient_admissions_router import router as patient_admissions_router 
+from app.facility.routers.facility_charge_nurses_router import router as charge_nurse_router
+from app.facility.routers.emergency_contact_router import router as emergency_contact_router
+from app.patients.routers.patient_address_router import router as patient_address_router
+from app.patients.routers.insurance_router import router as insurance_router
+from app.patients.routers.emergency_contact_router import router as patient_emergency_contact_router
+from app.patients.routers.medical_router import router as patient_medical_router
+from app.clinicalmonitoring.routers.category_router import router as category_router
+from app.clinicalmonitoring.routers.subcategory_router import router as subcategory_router
+from app.clinicalmonitoring.routers.template_builder_router import router as template_builder_router
+from app.schedule.router.scheduler_router import router as scheduler_router
+from app.prescriptions.router.prescription_router import router as prescription_router
+from app.device.router.device_router import router as devices_router
+from app.PatientNotes.routers.notes_router import router as notes_router
+
+
 from fastapi.middleware.cors import CORSMiddleware
 
 
@@ -70,6 +91,8 @@ app.include_router(facility_department_router)
 app.include_router(facility_room_router) 
 app.include_router(bed_router) 
 app.include_router(keycontact_router) 
+app.include_router(charge_nurse_router)
+app.include_router(emergency_contact_router)
 app.include_router(pharmacy_router) 
 app.include_router(laboratory_router) 
 app.include_router(imaging_center_router)   
@@ -79,13 +102,66 @@ app.include_router(work_station_router)
 app.include_router(device_router)
 app.include_router(interoperability_router)
 app.include_router(regulatory_router)
+app.include_router(accerditations_router)
+app.include_router(state_reporting_identifiers_router)
+
 app.include_router(standards_router)
 app.include_router(workflow_router)
+app.include_router(transport_vendor_router)
 app.include_router(security_router)
+app.include_router(breach_contact)
 app.include_router(quality_router)
+app.include_router(quality_reporting_router)
 app.include_router(provider_router)
 app.include_router(practice_router)
 app.include_router(clinical_router)
 app.include_router(provider_security_router)
 app.include_router(provider_documents_router)
 app.include_router(patient_router)
+app.include_router(patient_admissions_router)
+app.include_router(patient_address_router)
+app.include_router(insurance_router)
+app.include_router(patient_emergency_contact_router)
+app.include_router(patient_medical_router)
+
+# --------------------------------- Category -------------------------------------
+
+app.include_router(category_router)
+
+# --------------------------------------- Subcategory -------------------------------
+
+app.include_router(subcategory_router)
+
+
+# -------------------------------------- TemplateBuilder -------------------------------
+
+
+app.include_router(template_builder_router)
+
+
+# --------------------------- Scheduler ------------------------------------
+
+app.include_router(scheduler_router)
+
+
+# --------------------------- Prescription ------------------------------------
+
+app.include_router(prescription_router)
+
+
+
+
+
+
+# --------------------------- Devices ------------------------------------
+
+app.include_router(devices_router)
+app.include_router(notes_router)
+
+
+
+
+
+
+
+

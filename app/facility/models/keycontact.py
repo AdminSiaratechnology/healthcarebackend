@@ -14,8 +14,8 @@ class KeyContact(Document, AutoEncryptMixin, AutoDecryptMixin):
     medical_director: Binary | None = None
     admission_coordinator: Binary | None = None
     it_administrator: Binary | None = None
-    charge_nurse: Binary | None = None
-    emergency_contact: Binary | None = None
+    # charge_nurse: Binary | None = None
+    # emergency_contact: Binary | None = None
     created_by: Link[UserDoc] | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

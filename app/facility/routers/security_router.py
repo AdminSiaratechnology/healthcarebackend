@@ -59,7 +59,6 @@ async def create_security(
             phi_export_controls=enc_json_or_none(sec.phi_export_settings),
             breakglass_procedures=enc_json_or_none(sec.break_glass_audit),
             privacy_policies=enc_json_or_none(sec.privacy_officer_info),
-            breach_response_contacts=None,
             created_by=user,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -156,7 +155,6 @@ async def get_security_settings(
             "phi_export_controls": _decrypt_json_field(ce, sc.phi_export_controls),
             "breakglass_procedures": _decrypt_json_field(ce, sc.breakglass_procedures),
             "privacy_policies": _decrypt_json_field(ce, sc.privacy_policies),
-            "breach_response_contacts": _decrypt_json_field(ce, sc.breach_response_contacts),
             "created_at": sc.created_at,
             "updated_at": sc.updated_at,
         } for sc in docs

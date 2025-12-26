@@ -15,7 +15,6 @@ class SecurityDoc(Document, AutoEncryptMixin, AutoDecryptMixin):
     phi_export_controls: Binary | None = None  # Serialized JSON of security settings
     breakglass_procedures: Binary | None = None  # Serialized JSON of security settings
     privacy_policies: Binary | None = None  # Serialized JSON of security settings
-    breach_response_contacts: Binary | None = None  # Serialized JSON of security settings
     created_by: Link[UserDoc] | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

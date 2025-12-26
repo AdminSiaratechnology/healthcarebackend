@@ -14,7 +14,6 @@ class WorkflowDoc(Document, AutoEncryptMixin, AutoDecryptMixin):
     documentation_workflow: Binary | None = None  # Serialized JSON of workflow settings
     billing_workflow: Binary | None = None  # Serialized JSON of workflow settings
     clinical_protocols: Binary | None = None  # Serialized JSON of workflow settings
-    transport_vendors: Binary | None = None  # Serialized JSON of workflow settings
     vaccine_rules: Binary | None = None  # Serialized JSON of workflow settings
 
     created_by: Link[UserDoc] | None = None

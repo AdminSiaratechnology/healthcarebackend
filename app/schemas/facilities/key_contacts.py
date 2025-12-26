@@ -35,17 +35,7 @@ class ITAdministrator(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
 
-
-class chargeNurses(BaseModel):
-    name: Optional[str] = None
-    unit: Optional[str] = None
-    phone: Optional[str] = None
-    
-
-class EmergencyContact(BaseModel):
-    role: Optional[str] = None
-    phone: Optional[str] = None 
-    after_hours : bool = False
+  
 
 
 class KeyContacts(BaseModel):
@@ -55,5 +45,4 @@ class KeyContacts(BaseModel):
     it_administrator: Optional[ITAdministrator] = None
     # charge_nurse: Optional[chargeNurses] = None
     # emergency_contact: Optional[EmergencyContact] = None
-    charge_nurse: Optional[List[chargeNurses]] = None  # List of charge nurses
-    emergency_contact: Optional[List[EmergencyContact]] = None  # List of emergency contacts
+    
