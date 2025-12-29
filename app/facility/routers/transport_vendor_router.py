@@ -101,11 +101,7 @@ async def get_transport_vendors(
     current_user_id: str = Depends(get_current_user_id),
 ):
     try:
-        ce = getattr(request.app, "client_encryption", None)
-        if ce is None:
-            ce = init_encryption()
-            request.app.client_encryption = ce
-
+        
         user = await UserDoc.get(current_user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
@@ -121,16 +117,23 @@ async def get_transport_vendors(
         if not facility_obj:
             raise HTTPException(status_code=404, detail="Facility not found")
 
-        by_link = await TransportVendorDocs.find(TransportVendorDocs.facility_id.id == facility_obj.id).to_list()
-        by_str = await TransportVendorDocs.find(TransportVendorDocs.facility_id == str(facility_obj.id)).to_list()
 
-        seen = set()
-        docs = []
-        for d in by_link + by_str:
-            if str(d.id) in seen:
-                continue
-            seen.add(str(d.id))
-            docs.append(d)
+        # ---------------- ENCRYPTION ----------------
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+
+        # ---------------- Transport Vendor  ----------------
+        transport_vendor = await TransportVendorDocs.find(
+            TransportVendorDocs.facility_id.id == facility_obj.id,
+            TransportVendorDocs.created_by.id == user.id
+        ).sort("-created_at").to_list()
+
+
+        # ---------------- RESPONSE ----------------
+        
+       
 
         result = [
             {
@@ -139,7 +142,7 @@ async def get_transport_vendors(
                 "contact_number": _decrypt_value(ce, tv.contact_number),
                 "created_at": tv.created_at,
                 "updated_at": tv.updated_at,
-            } for tv in docs
+            } for tv in transport_vendor
         ]
 
         try:

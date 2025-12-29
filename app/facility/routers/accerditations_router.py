@@ -140,18 +140,21 @@ async def get_accreditations(
     if not facility_obj:
         raise HTTPException(status_code=404, detail="Facility not found")
 
+    # ---------------- ENCRYPTION ----------------
     ce = getattr(request.app, "client_encryption", None)
+    if ce is None:
+        ce = init_encryption()
+        request.app.client_encryption = ce
 
-    by_link = await AccerditationsDoc.find(AccerditationsDoc.facility_id.id == facility_obj.id).to_list()
-    by_str = await AccerditationsDoc.find(AccerditationsDoc.facility_id == str(facility_obj.id)).to_list()
+     # ---------------- AccerditationsDoc ----------------
+    accerditation = await AccerditationsDoc.find(
+        AccerditationsDoc.facility_id.id == facility_obj.id,
+        AccerditationsDoc.created_by.id == user.id
+    ).sort("-created_at").to_list()
 
-    seen = set()
-    docs = []
-    for d in by_link + by_str:
-        if str(d.id) in seen:
-            continue
-        seen.add(str(d.id))
-        docs.append(d)
+
+    # ---------------- RESPONSE ----------------
+
 
     result = [
         {
@@ -162,7 +165,7 @@ async def get_accreditations(
             "certificate_file_id": _decrypt_json_field(ce, acd.certificate_file_id),
             "created_at": acd.created_at,
             "updated_at": acd.updated_at,
-        } for acd in docs
+        } for acd in accerditation
     ]
 
     try:

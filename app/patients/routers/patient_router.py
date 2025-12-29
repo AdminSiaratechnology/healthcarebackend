@@ -15,6 +15,7 @@ from beanie import PydanticObjectId
 import json
 import os
 from app.patients.models.patients import PatientDoc
+from app.patients.models.admissons import PatientAdmissionDoc
 
 router = APIRouter(prefix="/patient", tags=["Patients"])
 
@@ -317,6 +318,317 @@ async def get_patient(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# @router.get("/list/")
+# async def list_patients(
+#     request: Request,
+#     current_user_id: str = Depends(get_current_user_id),
+#     search: str = "",
+#     page: int = 1,
+#     limit: int = 10,
+# ):
+#     try:
+#         ce = getattr(request.app, "client_encryption", None)
+#         if ce is None:
+#             ce = init_encryption()
+#             request.app.client_encryption = ce
+
+#         user = await UserDoc.get(current_user_id)
+#         if not user:
+#             raise HTTPException(status_code=404, detail="User not found")
+
+#         by_link = await PatientDoc.find(PatientDoc.created_by.id == user.id).sort("-created_at").to_list()
+#         by_str = await PatientDoc.find(PatientDoc.created_by == str(user.id)).sort("-created_at").to_list()
+
+
+#         seen = set()
+#         docs: list[PatientDoc] = []
+#         for d in by_link + by_str:
+#             did = str(getattr(d, "id", ""))
+#             if not did or did in seen:
+#                 continue
+#             seen.add(did)
+#             docs.append(d)
+
+#         q = (search or "").strip().lower()
+#         q_tokens = [t for t in q.split() if t]
+
+#         items = []
+#         for doc in docs:
+#             full_name = None
+#             usr_id = None
+            
+#             if doc.user_id:
+#                 try:
+#                     usr_doc = await doc.user_id.fetch()
+#                     usr_id = str(usr_doc.id)
+#                     full_name = _decrypt_value(ce, getattr(usr_doc, "full_name", None))
+#                 except Exception:
+#                     try:
+#                         usr_id = str(getattr(doc.user_id, "id"))
+#                     except Exception:
+#                         usr_id = None
+
+#             personal_payload = _decrypt_json_field(ce, doc.personal_information) or {}
+#             personal_info = (personal_payload or {}).get("personal") or {}
+
+#             first_name = personal_info.get("first_name")
+#             middle_name = personal_info.get("middle_name")
+#             last_name = personal_info.get("last_name")
+
+#             if q_tokens:
+#                 blob = " ".join([
+#                     full_name or "",
+#                     first_name or "",
+#                     middle_name or "",
+#                     last_name or "",
+#                 ]).lower()
+#                 ok = all(t in blob for t in q_tokens)
+#                 if not ok:
+#                     continue
+
+#             fac_id = None
+#             if doc.facility_id:
+#                 try:
+#                     fac_doc = await doc.facility_id.fetch()
+#                     fac_id = str(fac_doc.id)
+#                 except Exception:
+#                     try:
+#                         fac_id = str(getattr(doc.facility_id, "id"))
+#                     except Exception:
+#                         fac_id = None
+
+#             prov_id = None
+#             if doc.provider_id:
+#                 try:
+#                     prov_doc = await doc.provider_id.fetch()
+#                     prov_id = str(prov_doc.id)
+#                 except Exception:
+#                     try:
+#                         prov_id = str(getattr(doc.provider_id, "id"))
+#                     except Exception:
+#                         prov_id = None
+
+#             items.append({
+#                 "id": str(doc.id),
+#                 "facility_id": fac_id,
+#                 "provider_id": prov_id,
+#                 "user_id": usr_id,
+#                 "full_name": full_name,
+#                 "first_name": first_name,
+#                 "middle_name": middle_name,
+#                 "last_name": last_name,
+#                 "created_at": doc.created_at,
+#                 "updated_at": doc.updated_at,
+#             })
+
+#         total = len(items)
+#         if limit <= 0:
+#             limit = 10
+#         if page <= 0:
+#             page = 1
+#         start = (page - 1) * limit
+#         end = start + limit
+#         page_items = items[start:end]
+#         pages = (total + limit - 1) // limit
+
+#         try:
+#             await log_audit(
+#                 request=request,
+#                 user_id=str(user.id),
+#                 action="Read",
+#                 resource="Patient",
+#                 resource_id=f"list:created_by:{str(user.id)}",
+#                 status="success",
+#                 notes="Patients listed",
+#             )
+#         except Exception:
+#             pass
+
+#         return {
+#             "patients": page_items,
+#             "page": page,
+#             "limit": limit,
+#             "total": total,
+#             "pages": pages,
+#         }
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         try:
+#             await log_audit(
+#                 request=request,
+#                 user_id=current_user_id,
+#                 action="Read",
+#                 resource="Patient",
+#                 resource_id=f"list:created_by:{current_user_id}",
+#                 status="failed",
+#                 notes=str(e),
+#             )
+#         except Exception:
+#             pass
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+
+# @router.get("/list/")
+# async def list_patients(
+#     request: Request,
+#     current_user_id: str = Depends(get_current_user_id),
+#     search: str = "",
+#     page: int = 1,
+#     limit: int = 10,
+# ):
+#     try:
+#         # ----------------- Encryption -----------------
+#         ce = getattr(request.app, "client_encryption", None)
+#         if ce is None:
+#             ce = init_encryption()
+#             request.app.client_encryption = ce
+
+#         # ----------------- User -----------------
+#         user = await UserDoc.get(current_user_id)
+#         if not user:
+#             raise HTTPException(status_code=404, detail="User not found")
+
+#         # ----------------- Patients (created by user) -----------------
+#         patients = await PatientDoc.find(
+#             PatientDoc.created_by.id == user.id
+#         ).sort("-created_at").to_list()
+
+#         q = (search or "").strip().lower()
+#         q_tokens = [t for t in q.split() if t]
+
+#         items = []
+
+#         for doc in patients:
+#             # ----------------- Patient User -----------------
+#             full_name = None
+#             user_id = None
+#             if doc.user_id:
+#                 try:
+#                     usr = await doc.user_id.fetch()
+#                     user_id = str(usr.id)
+#                     full_name = _decrypt_value(ce, usr.full_name)
+#                 except Exception:
+#                     pass
+
+#             # ----------------- Personal Info -----------------
+#             personal_payload = _decrypt_json_field(ce, doc.personal_information) or {}
+#             personal = personal_payload.get("personal", {})
+
+#             first_name = personal.get("first_name")
+#             middle_name = personal.get("middle_name")
+#             last_name = personal.get("last_name")
+
+#             # ----------------- Search -----------------
+#             if q_tokens:
+#                 blob = " ".join([
+#                     full_name or "",
+#                     first_name or "",
+#                     middle_name or "",
+#                     last_name or "",
+#                 ]).lower()
+#                 if not all(t in blob for t in q_tokens):
+#                     continue
+
+#             # ----------------- Latest Admission -----------------
+#             admission = await PatientAdmissionDoc.find(
+#                 PatientAdmissionDoc.patient_id.id == doc.id
+#             ).sort("-created_at").first_or_none()
+
+#             room_id = None
+#             provider_name = None
+#             status = None
+
+#             if admission:
+#                 # -------- Room --------
+#                 if admission.room_id:
+#                     try:
+#                         room = await admission.room_id.fetch()
+#                         room_id = _decrypt_value(ce, room.room_id)
+#                     except Exception:
+#                         pass
+
+#                 # -------- Provider --------
+#             if doc.provider_id:
+#                 try:
+#                     provider = await doc.provider_id.fetch()
+#                     if provider.user:
+#                         prov_user = await provider.user.fetch()
+#                         provider_name = _decrypt_value(ce, prov_user.full_name)
+#                 except Exception:
+#                     pass
+#             print("here is provider name", provider_name)
+
+#                 # -------- Status --------
+#             status = _decrypt_value(ce, admission.status)
+
+#             items.append({
+#                 "id": str(doc.id),
+#                 "user_id": user_id,
+#                 "full_name": full_name,
+#                 "first_name": first_name,
+#                 "middle_name": middle_name,
+#                 "last_name": last_name,
+#                 "room_id": room_id,
+#                 "provider_name": provider_name,
+#                 "status": status,
+#                 "created_at": doc.created_at,
+#                 "updated_at": doc.updated_at,
+#             })
+
+#         # ----------------- Pagination -----------------
+#         total = len(items)
+#         limit = max(limit, 1)
+#         page = max(page, 1)
+#         start = (page - 1) * limit
+#         end = start + limit
+
+#         response = {
+#             "patients": items[start:end],
+#             "page": page,
+#             "limit": limit,
+#             "total": total,
+#             "pages": (total + limit - 1) // limit,
+#         }
+
+#         # ----------------- Audit -----------------
+#         try:
+#             await log_audit(
+#                 request=request,
+#                 user_id=str(user.id),
+#                 action="READ",
+#                 resource="Patient",
+#                 resource_id=f"list:{user.id}",
+#                 status="success",
+#                 notes="Patient list retrieved",
+#             )
+#         except Exception:
+#             pass
+
+#         return response
+
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         try:
+#             await log_audit(
+#                 request=request,
+#                 user_id=current_user_id,
+#                 action="READ",
+#                 resource="Patient",
+#                 resource_id="list",
+#                 status="failed",
+#                 notes=str(e),
+#             )
+#         except Exception:
+#             pass
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+
 @router.get("/list/")
 async def list_patients(
     request: Request,
@@ -326,52 +638,48 @@ async def list_patients(
     limit: int = 10,
 ):
     try:
+        # ----------------- Encryption -----------------
         ce = getattr(request.app, "client_encryption", None)
         if ce is None:
             ce = init_encryption()
             request.app.client_encryption = ce
 
+        # ----------------- User -----------------
         user = await UserDoc.get(current_user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        by_link = await PatientDoc.find(PatientDoc.created_by.id == user.id).sort("-created_at").to_list()
-        by_str = await PatientDoc.find(PatientDoc.created_by == str(user.id)).sort("-created_at").to_list()
-
-        seen = set()
-        docs: list[PatientDoc] = []
-        for d in by_link + by_str:
-            did = str(getattr(d, "id", ""))
-            if not did or did in seen:
-                continue
-            seen.add(did)
-            docs.append(d)
+        # ----------------- Patients -----------------
+        patients = await PatientDoc.find(
+            PatientDoc.created_by.id == user.id
+        ).sort("-created_at").to_list()
 
         q = (search or "").strip().lower()
         q_tokens = [t for t in q.split() if t]
 
         items = []
-        for doc in docs:
+
+        for doc in patients:
+            # ----------------- Patient User -----------------
             full_name = None
-            usr_id = None
+            user_id = None
             if doc.user_id:
                 try:
-                    usr_doc = await doc.user_id.fetch()
-                    usr_id = str(usr_doc.id)
-                    full_name = _decrypt_value(ce, getattr(usr_doc, "full_name", None))
+                    usr = await doc.user_id.fetch()
+                    user_id = str(usr.id)
+                    full_name = _decrypt_value(ce, usr.full_name)
                 except Exception:
-                    try:
-                        usr_id = str(getattr(doc.user_id, "id"))
-                    except Exception:
-                        usr_id = None
+                    pass
 
+            # ----------------- Personal Info -----------------
             personal_payload = _decrypt_json_field(ce, doc.personal_information) or {}
-            personal_info = (personal_payload or {}).get("personal") or {}
+            personal = personal_payload.get("personal", {})
 
-            first_name = personal_info.get("first_name")
-            middle_name = personal_info.get("middle_name")
-            last_name = personal_info.get("last_name")
+            first_name = personal.get("first_name")
+            middle_name = personal.get("middle_name")
+            last_name = personal.get("last_name")
 
+            # ----------------- Search -----------------
             if q_tokens:
                 blob = " ".join([
                     full_name or "",
@@ -379,75 +687,86 @@ async def list_patients(
                     middle_name or "",
                     last_name or "",
                 ]).lower()
-                ok = all(t in blob for t in q_tokens)
-                if not ok:
+                if not all(t in blob for t in q_tokens):
                     continue
 
-            fac_id = None
-            if doc.facility_id:
-                try:
-                    fac_doc = await doc.facility_id.fetch()
-                    fac_id = str(fac_doc.id)
-                except Exception:
-                    try:
-                        fac_id = str(getattr(doc.facility_id, "id"))
-                    except Exception:
-                        fac_id = None
+            # ----------------- Latest Admission -----------------
+            admission = await PatientAdmissionDoc.find(
+                PatientAdmissionDoc.patient_id.id == doc.id
+            ).sort("-created_at").first_or_none()
 
-            prov_id = None
+            room_id = None
+            provider_name = None
+            status = None
+
+            # -------- Admission fields --------
+            if admission:
+                # Room
+                if admission.room_id:
+                    try:
+                        room = await admission.room_id.fetch()
+                        room_id = _decrypt_value(ce, room.room_id)
+                    except Exception:
+                        pass
+
+                # Status
+                status = _decrypt_value(ce, admission.status)
+
+            # -------- Provider (from PatientDoc) --------
             if doc.provider_id:
                 try:
-                    prov_doc = await doc.provider_id.fetch()
-                    prov_id = str(prov_doc.id)
+                    provider = await doc.provider_id.fetch()
+                    if provider.user:
+                        prov_user = await provider.user.fetch()
+                        provider_name = _decrypt_value(ce, prov_user.full_name)
                 except Exception:
-                    try:
-                        prov_id = str(getattr(doc.provider_id, "id"))
-                    except Exception:
-                        prov_id = None
+                    pass
 
             items.append({
                 "id": str(doc.id),
-                "facility_id": fac_id,
-                "provider_id": prov_id,
-                "user_id": usr_id,
+                "user_id": user_id,
                 "full_name": full_name,
                 "first_name": first_name,
                 "middle_name": middle_name,
                 "last_name": last_name,
+                "room_id": room_id,
+                "provider_name": provider_name,
+                "status": status,
                 "created_at": doc.created_at,
                 "updated_at": doc.updated_at,
             })
 
+        # ----------------- Pagination -----------------
         total = len(items)
-        if limit <= 0:
-            limit = 10
-        if page <= 0:
-            page = 1
+        limit = max(limit, 1)
+        page = max(page, 1)
         start = (page - 1) * limit
         end = start + limit
-        page_items = items[start:end]
-        pages = (total + limit - 1) // limit
 
+        response = {
+            "patients": items[start:end],
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "pages": (total + limit - 1) // limit,
+        }
+
+        # ----------------- Audit -----------------
         try:
             await log_audit(
                 request=request,
                 user_id=str(user.id),
-                action="Read",
+                action="READ",
                 resource="Patient",
-                resource_id=f"list:created_by:{str(user.id)}",
+                resource_id=f"list:{user.id}",
                 status="success",
-                notes="Patients listed",
+                notes="Patient list retrieved",
             )
         except Exception:
             pass
 
-        return {
-            "patients": page_items,
-            "page": page,
-            "limit": limit,
-            "total": total,
-            "pages": pages,
-        }
+        return response
+
     except HTTPException:
         raise
     except Exception as e:
@@ -455,12 +774,13 @@ async def list_patients(
             await log_audit(
                 request=request,
                 user_id=current_user_id,
-                action="Read",
+                action="READ",
                 resource="Patient",
-                resource_id=f"list:created_by:{current_user_id}",
+                resource_id="list",
                 status="failed",
                 notes=str(e),
             )
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=str(e))
+    

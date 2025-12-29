@@ -127,18 +127,23 @@ async def get_wifi_networks(
     if not facility_obj:
         raise HTTPException(status_code=404, detail="Facility not found")
 
+    # encrypt 
     ce = getattr(request.app, "client_encryption", None)
+    if ce is None:
+        ce = init_encryption()
+        request.app.client_encryption = ce
 
-    by_link = await WifiNetwork.find(WifiNetwork.facility_id.id == facility_obj.id).to_list()
-    by_str = await WifiNetwork.find(WifiNetwork.facility_id == str(facility_obj.id)).to_list()
+        # ---------------- Wifi Network  ----------------
+    wifi_network = await WifiNetwork.find(
+        WifiNetwork.facility_id.id == facility_obj.id,
+        WifiNetwork.created_by.id == user.id
+    ).sort("-created_at").to_list()
+   
 
-    seen = set()
-    docs = []
-    for d in by_link + by_str:
-        if str(d.id) in seen:
-            continue
-        seen.add(str(d.id))
-        docs.append(d)
+   
+
+    # Response 
+
 
     result = [
         {
@@ -148,7 +153,7 @@ async def get_wifi_networks(
             "guest_network": _decrypt_value(ce, wf.guest_network),
             "created_at": wf.created_at,
             "updated_at": wf.updated_at,
-        } for wf in docs
+        } for wf in wifi_network
     ]
 
     try:

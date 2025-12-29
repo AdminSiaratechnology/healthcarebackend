@@ -131,28 +131,30 @@ async def get_device_inventories(
     if not facility_obj:
         raise HTTPException(status_code=404, detail="Facility not found")
 
+     # encrypt 
     ce = getattr(request.app, "client_encryption", None)
+    if ce is None:
+        ce = init_encryption()
+        request.app.client_encryption = ce
 
-    by_link = await DeviceInventory.find(DeviceInventory.facility_id.id == facility_obj.id).to_list()
-    by_str = await DeviceInventory.find(DeviceInventory.facility_id == str(facility_obj.id)).to_list()
+    # ---------------- Device Inventory  ----------------
+    device_inventory = await DeviceInventory.find(
+        DeviceInventory.facility_id.id == facility_obj.id,
+        DeviceInventory.created_by.id == user.id
+    ).sort("-created_at").to_list()
+   
 
-    seen = set()
-    docs = []
-    for d in by_link + by_str:
-        if str(d.id) in seen:
-            continue
-        seen.add(str(d.id))
-        docs.append(d)
 
+    # response 
     result = [
         {
             "id": str(di.id),
             "device_type": _decrypt_value(ce, di.device_type),
-            "count": _decrypt_value(ce, di.count),
+            "count": _decrypt_value(ce, di.counts),
             "operating_system": _decrypt_value(ce, di.operating_system),
             "created_at": di.created_at,
             "updated_at": di.updated_at,
-        } for di in docs
+        } for di in device_inventory
     ]
 
     try:

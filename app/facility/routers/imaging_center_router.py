@@ -133,17 +133,20 @@ async def get_imaging_centers(
         raise HTTPException(status_code=404, detail="Facility not found")
 
     ce = getattr(request.app, "client_encryption", None)
+    if ce is None:
+        ce = init_encryption()
+        request.app.client_encryption = ce
 
-    by_link = await ImagingCenter.find(ImagingCenter.facility_id.id == facility_obj.id).to_list()
-    by_str = await ImagingCenter.find(ImagingCenter.facility_id == str(facility_obj.id)).to_list()
+    # ---------------- Imaging Center  ----------------
+    imaging_center = await ImagingCenter.find(
+        ImagingCenter.facility_id.id == facility_obj.id,
+        ImagingCenter.created_by.id == user.id
+    ).sort("-created_at").to_list()
+   
+   
 
-    seen = set()
-    docs = []
-    for d in by_link + by_str:
-        if str(d.id) in seen:
-            continue
-        seen.add(str(d.id))
-        docs.append(d)
+
+   
 
     result = [
         {
@@ -155,7 +158,7 @@ async def get_imaging_centers(
             "transport_notes": _decrypt_value(ce, ic.transport_notes),
             "created_at": ic.created_at,
             "updated_at": ic.updated_at,
-        } for ic in docs
+        } for ic in imaging_center
     ]
 
     try:

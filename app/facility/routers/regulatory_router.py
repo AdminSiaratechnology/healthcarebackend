@@ -141,18 +141,23 @@ async def get_regulatory_info(
     if not facility_obj:
         raise HTTPException(status_code=404, detail="Facility not found")
 
+     # ---------------- ENCRYPTION ----------------
     ce = getattr(request.app, "client_encryption", None)
+    if ce is None:
+        ce = init_encryption()
+        request.app.client_encryption = ce
 
-    by_link = await RegulatoryInfoDoc.find(RegulatoryInfoDoc.facility_id.id == facility_obj.id).to_list()
-    by_str = await RegulatoryInfoDoc.find(RegulatoryInfoDoc.facility_id == str(facility_obj.id)).to_list()
+     # ---------------- Regulatory ----------------
+    regulatory = await RegulatoryInfoDoc.find(
+        RegulatoryInfoDoc.facility_id.id == facility_obj.id,
+        RegulatoryInfoDoc.created_by.id == user.id
+    ).sort("-created_at").to_list()
 
-    seen = set()
-    docs = []
-    for d in by_link + by_str:
-        if str(d.id) in seen:
-            continue
-        seen.add(str(d.id))
-        docs.append(d)
+
+    # ---------------- RESPONSE ----------------
+
+
+    
 
     result = [
         {
@@ -164,7 +169,7 @@ async def get_regulatory_info(
             "state_reporting_identifier": _decrypt_json_field(ce, rg.state_reporting_identifier),
             "created_at": rg.created_at,
             "updated_at": rg.updated_at,
-        } for rg in docs
+        } for rg in regulatory
     ]
 
     try:

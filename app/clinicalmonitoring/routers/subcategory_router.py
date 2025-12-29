@@ -142,7 +142,13 @@ async def list_subcategories(
     if not cat_doc:
         raise HTTPException(status_code=404, detail="Category not found")
 
-    subs = await SubcategoryDoc.find({"category_id.$id": cat_doc.id}).to_list()
+    # subs = await SubcategoryDoc.find({"category_id.$id": cat_doc.id}).to_list()
+    subs = await SubcategoryDoc.find(
+        SubcategoryDoc.category_id.id == cat_doc.id,
+        SubcategoryDoc.created_by.id == user.id
+    ).sort("-created_at").to_list()
+
+
     
     items = []
     for s in subs:

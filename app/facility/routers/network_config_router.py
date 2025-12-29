@@ -148,19 +148,21 @@ async def get_network_configs(
     if not facility_obj:
         raise HTTPException(status_code=404, detail="Facility not found")
 
+    # encrypt 
     ce = getattr(request.app, "client_encryption", None)
+    if ce is None:
+        ce = init_encryption()
+        request.app.client_encryption = ce
+    
+    # ---------------- Network Config  ----------------
+    netwrok_config = await NetworkConfig.find(
+        NetworkConfig.facility_id.id == facility_obj.id,
+        NetworkConfig.created_by.id == user.id
+    ).sort("-created_at").to_list()
+   
 
-    by_link = await NetworkConfig.find(NetworkConfig.facility_id.id == facility_obj.id).to_list()
-    by_str = await NetworkConfig.find(NetworkConfig.facility_id == str(facility_obj.id)).to_list()
-
-    seen = set()
-    docs = []
-    for d in by_link + by_str:
-        if str(d.id) in seen:
-            continue
-        seen.add(str(d.id))
-        docs.append(d)
-
+    # Response 
+   
     result = [
         {
             "id": str(cfg.id),
@@ -171,7 +173,7 @@ async def get_network_configs(
             "printer_routing_map": _decrypt_json_field(ce, cfg.printer_routing_map),
             "created_at": cfg.created_at,
             "updated_at": cfg.updated_at,
-        } for cfg in docs
+        } for cfg in netwrok_config
     ]
 
     try:

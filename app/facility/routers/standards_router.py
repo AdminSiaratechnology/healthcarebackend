@@ -135,18 +135,22 @@ async def get_standards(
     if not facility_obj:
         raise HTTPException(status_code=404, detail="Facility not found")
 
+     # ---------------- ENCRYPTION ----------------
     ce = getattr(request.app, "client_encryption", None)
+    if ce is None:
+        ce = init_encryption()
+        request.app.client_encryption = ce
 
-    by_link = await StandardsDoc.find(StandardsDoc.facility_id.id == facility_obj.id).to_list()
-    by_str = await StandardsDoc.find(StandardsDoc.facility_id == str(facility_obj.id)).to_list()
+    # ---------------- STANDARD  ----------------
+    standard = await StandardsDoc.find(
+        StandardsDoc.facility_id.id == facility_obj.id,
+        StandardsDoc.created_by.id == user.id
+    ).sort("-created_at").to_list()
 
-    seen = set()
-    docs = []
-    for d in by_link + by_str:
-        if str(d.id) in seen:
-            continue
-        seen.add(str(d.id))
-        docs.append(d)
+
+    # ---------------- RESPONSE ----------------
+
+
 
     result = [
         {
@@ -158,7 +162,7 @@ async def get_standards(
             "terminology_update": _decrypt_json_field(ce, sd.terminology_update),
             "created_at": sd.created_at,
             "updated_at": sd.updated_at,
-        } for sd in docs
+        } for sd in standard
     ]
 
     try:

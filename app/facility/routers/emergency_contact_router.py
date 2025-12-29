@@ -105,82 +105,144 @@ async def create_emergency_contact(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# @router.get("/emergency-contact/get/{facility_id}/")
+# async def get_emergency_contacts(
+#     facility_id: str,
+#     request: Request,
+#     current_user_id: str = Depends(get_current_user_id),
+# ):
+#     try:
+#         ce = getattr(request.app, "client_encryption", None)
+#         if ce is None:
+#             ce = init_encryption()
+#             request.app.client_encryption = ce
+
+#         user = await UserDoc.get(current_user_id)
+#         if not user:
+#             raise HTTPException(status_code=404, detail="User not found")
+
+#         facility_obj = None
+#         try:
+#             facility_obj_id = PydanticObjectId(facility_id)
+#             facility_obj = await Facility.get(facility_obj_id)
+#         except Exception:
+#             pass
+#         if facility_obj is None:
+#             facility_obj = await Facility.get(facility_id)
+#         if not facility_obj:
+#             raise HTTPException(status_code=404, detail="Facility not found")
+
+#         by_link = await EmergencyContactDocs.find(EmergencyContactDocs.facility_id.id == facility_obj.id).to_list()
+#         by_str = await EmergencyContactDocs.find(EmergencyContactDocs.facility_id == str(facility_obj.id)).to_list()
+
+#         seen = set()
+#         docs = []
+#         for d in by_link + by_str:
+#             if str(d.id) in seen:
+#                 continue
+#             seen.add(str(d.id))
+#             docs.append(d)
+
+#         result = [
+#             {
+#                 "id": str(ec.id),
+#                 "role": _decrypt_value(ce, ec.role),
+#                 "phone": _decrypt_value(ce, ec.phone),
+#                 "after_hour": _decrypt_value(ce, ec.after_hour),
+#                 "created_at": ec.created_at,
+#                 "updated_at": ec.updated_at,
+#             } for ec in docs
+#         ]
+
+#         try:
+#             await log_audit(
+#                 request=request,
+#                 user_id=str(user.id),
+#                 action="Read",
+#                 resource="Emergency Contact",
+#                 resource_id=str(facility_obj.id),
+#                 status="success",
+#                 notes="Emergency contacts fetched",
+#             )
+#         except Exception:
+#             pass
+
+#         return result
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         try:
+#             await log_audit(
+#                 request=request,
+#                 user_id=current_user_id,
+#                 action="Read",
+#                 resource="Emergency Contact",
+#                 resource_id=facility_id,
+#                 status="failed",
+#                 notes=str(e),
+#             )
+#         except Exception:
+#             pass
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+
 @router.get("/emergency-contact/get/{facility_id}/")
 async def get_emergency_contacts(
     facility_id: str,
     request: Request,
     current_user_id: str = Depends(get_current_user_id),
 ):
+    # ---------------- USER ----------------
+    user = await UserDoc.get(current_user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # ---------------- FACILITY ----------------
     try:
-        ce = getattr(request.app, "client_encryption", None)
-        if ce is None:
-            ce = init_encryption()
-            request.app.client_encryption = ce
+        facility = await Facility.get(PydanticObjectId(facility_id))
+    except Exception:
+        facility = await Facility.get(facility_id)
 
-        user = await UserDoc.get(current_user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
+    if not facility:
+        raise HTTPException(status_code=404, detail="Facility not found")
 
-        facility_obj = None
-        try:
-            facility_obj_id = PydanticObjectId(facility_id)
-            facility_obj = await Facility.get(facility_obj_id)
-        except Exception:
-            pass
-        if facility_obj is None:
-            facility_obj = await Facility.get(facility_id)
-        if not facility_obj:
-            raise HTTPException(status_code=404, detail="Facility not found")
+    # ---------------- ENCRYPTION ----------------
+    ce = getattr(request.app, "client_encryption", None)
+    if ce is None:
+        ce = init_encryption()
+        request.app.client_encryption = ce
 
-        by_link = await EmergencyContactDocs.find(EmergencyContactDocs.facility_id.id == facility_obj.id).to_list()
-        by_str = await EmergencyContactDocs.find(EmergencyContactDocs.facility_id == str(facility_obj.id)).to_list()
+    # ---------------- EMERGENCY CONTACTS ----------------
+    contacts = await EmergencyContactDocs.find(
+        EmergencyContactDocs.facility_id.id == facility.id,
+        EmergencyContactDocs.created_by.id == user.id
+    ).sort("-created_at").to_list()
 
-        seen = set()
-        docs = []
-        for d in by_link + by_str:
-            if str(d.id) in seen:
-                continue
-            seen.add(str(d.id))
-            docs.append(d)
+    # ---------------- RESPONSE ----------------
+    result = [
+        {
+            "id": str(ec.id),
+            "role": _decrypt_value(ce, ec.role),
+            "phone": _decrypt_value(ce, ec.phone),
+            "after_hour": _decrypt_value(ce, ec.after_hour),
+            "created_at": ec.created_at,
+            "updated_at": ec.updated_at,
+        } for ec in contacts
+    ]
 
-        result = [
-            {
-                "id": str(ec.id),
-                "role": _decrypt_value(ce, ec.role),
-                "phone": _decrypt_value(ce, ec.phone),
-                "after_hour": _decrypt_value(ce, ec.after_hour),
-                "created_at": ec.created_at,
-                "updated_at": ec.updated_at,
-            } for ec in docs
-        ]
+    # ---------------- AUDIT ----------------
+    try:
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Read",
+            resource="Emergency Contact",
+            resource_id=str(facility.id),
+            status="success",
+            notes="Emergency contacts fetched successfully",
+        )
+    except Exception:
+        pass
 
-        try:
-            await log_audit(
-                request=request,
-                user_id=str(user.id),
-                action="Read",
-                resource="Emergency Contact",
-                resource_id=str(facility_obj.id),
-                status="success",
-                notes="Emergency contacts fetched",
-            )
-        except Exception:
-            pass
-
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        try:
-            await log_audit(
-                request=request,
-                user_id=current_user_id,
-                action="Read",
-                resource="Emergency Contact",
-                resource_id=facility_id,
-                status="failed",
-                notes=str(e),
-            )
-        except Exception:
-            pass
-        raise HTTPException(status_code=500, detail=str(e))
+    return result

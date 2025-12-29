@@ -103,83 +103,144 @@ async def create_charge_nurse(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# @router.get("/charge-nurse/get/{facility_id}/")
+# async def get_charge_nurses(
+#     facility_id: str,
+#     request: Request,
+#     current_user_id: str = Depends(get_current_user_id),
+# ):
+#     try:
+#         ce = getattr(request.app, "client_encryption", None)
+#         if ce is None:
+#             ce = init_encryption()
+#             request.app.client_encryption = ce
+
+#         user = await UserDoc.get(current_user_id)
+#         if not user:
+#             raise HTTPException(status_code=404, detail="User not found")
+
+#         facility_obj = None
+#         try:
+#             facility_obj_id = PydanticObjectId(facility_id)
+#             facility_obj = await Facility.get(facility_obj_id)
+#         except Exception:
+#             pass
+
+#         if facility_obj is None:
+#             facility_obj = await Facility.get(facility_id)
+#         if not facility_obj:
+#             raise HTTPException(status_code=404, detail="Facility not found")
+
+#         by_link = await ChargeNursesDoc.find(ChargeNursesDoc.facility_id.id == facility_obj.id).to_list()
+#         by_str = await ChargeNursesDoc.find(ChargeNursesDoc.facility_id == str(facility_obj.id)).to_list()
+
+#         seen = set()
+#         docs = []
+#         for d in by_link + by_str:
+#             if str(d.id) in seen:
+#                 continue
+#             seen.add(str(d.id))
+#             docs.append(d)
+
+#         result = [
+#             {
+#                 "id": str(cn.id),
+#                 "name": _decrypt_value(ce, cn.name),
+#                 "unit": _decrypt_value(ce, cn.unit),
+#                 "phone": _decrypt_value(ce, cn.phone),
+#                 "created_at": cn.created_at,
+#                 "updated_at": cn.updated_at,
+#             } for cn in docs
+#         ]
+
+#         try:
+#             await log_audit(
+#                 request=request,
+#                 user_id=str(user.id),
+#                 action="Read",
+#                 resource="Charge Nurse",
+#                 resource_id=str(facility_obj.id),
+#                 status="success",
+#                 notes="Charge nurses fetched",
+#             )
+#         except Exception:
+#             pass
+
+#         return result
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         try:
+#             await log_audit(
+#                 request=request,
+#                 user_id=current_user_id,
+#                 action="Read",
+#                 resource="Charge Nurse",
+#                 resource_id=facility_id,
+#                 status="failed",
+#                 notes=str(e),
+#             )
+#         except Exception:
+#             pass
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/charge-nurse/get/{facility_id}/")
 async def get_charge_nurses(
     facility_id: str,
     request: Request,
     current_user_id: str = Depends(get_current_user_id),
 ):
+    # ---------------- USER ----------------
+    user = await UserDoc.get(current_user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # ---------------- FACILITY ----------------
     try:
-        ce = getattr(request.app, "client_encryption", None)
-        if ce is None:
-            ce = init_encryption()
-            request.app.client_encryption = ce
+        facility = await Facility.get(PydanticObjectId(facility_id))
+    except Exception:
+        facility = await Facility.get(facility_id)
 
-        user = await UserDoc.get(current_user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
+    if not facility:
+        raise HTTPException(status_code=404, detail="Facility not found")
 
-        facility_obj = None
-        try:
-            facility_obj_id = PydanticObjectId(facility_id)
-            facility_obj = await Facility.get(facility_obj_id)
-        except Exception:
-            pass
+    # ---------------- ENCRYPTION ----------------
+    ce = getattr(request.app, "client_encryption", None)
+    if ce is None:
+        ce = init_encryption()
+        request.app.client_encryption = ce
 
-        if facility_obj is None:
-            facility_obj = await Facility.get(facility_id)
-        if not facility_obj:
-            raise HTTPException(status_code=404, detail="Facility not found")
+    # ---------------- CHARGE NURSES (facility + created_by) ----------------
+    charge_nurses = await ChargeNursesDoc.find(
+        ChargeNursesDoc.facility_id.id == facility.id,
+        ChargeNursesDoc.created_by.id == user.id
+    ).sort("-created_at").to_list()
 
-        by_link = await ChargeNursesDoc.find(ChargeNursesDoc.facility_id.id == facility_obj.id).to_list()
-        by_str = await ChargeNursesDoc.find(ChargeNursesDoc.facility_id == str(facility_obj.id)).to_list()
+    # ---------------- RESPONSE ----------------
+    result = []
+    for cn in charge_nurses:
+        result.append({
+            "id": str(cn.id),
+            "name": _decrypt_value(ce, cn.name),
+            "unit": _decrypt_value(ce, cn.unit),
+            "phone": _decrypt_value(ce, cn.phone),
+            "created_at": cn.created_at,
+            "updated_at": cn.updated_at,
+        })
 
-        seen = set()
-        docs = []
-        for d in by_link + by_str:
-            if str(d.id) in seen:
-                continue
-            seen.add(str(d.id))
-            docs.append(d)
+    # ---------------- AUDIT ----------------
+    try:
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Read",
+            resource="Charge Nurse",
+            resource_id=str(facility.id),
+            status="success",
+            notes="Charge nurses fetched successfully",
+        )
+    except Exception:
+        pass
 
-        result = [
-            {
-                "id": str(cn.id),
-                "name": _decrypt_value(ce, cn.name),
-                "unit": _decrypt_value(ce, cn.unit),
-                "phone": _decrypt_value(ce, cn.phone),
-                "created_at": cn.created_at,
-                "updated_at": cn.updated_at,
-            } for cn in docs
-        ]
-
-        try:
-            await log_audit(
-                request=request,
-                user_id=str(user.id),
-                action="Read",
-                resource="Charge Nurse",
-                resource_id=str(facility_obj.id),
-                status="success",
-                notes="Charge nurses fetched",
-            )
-        except Exception:
-            pass
-
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        try:
-            await log_audit(
-                request=request,
-                user_id=current_user_id,
-                action="Read",
-                resource="Charge Nurse",
-                resource_id=facility_id,
-                status="failed",
-                notes=str(e),
-            )
-        except Exception:
-            pass
-        raise HTTPException(status_code=500, detail=str(e))
+    return result

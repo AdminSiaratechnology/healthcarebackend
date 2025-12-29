@@ -125,18 +125,21 @@ async def get_interoperabilities(
     if not facility_obj:
         raise HTTPException(status_code=404, detail="Facility not found")
 
+    # ---------------- ENCRYPTION ----------------
     ce = getattr(request.app, "client_encryption", None)
+    if ce is None:
+        ce = init_encryption()
+        request.app.client_encryption = ce
+    
+     # ---------------- Interoperability ----------------
+    interopability = await Interoperability.find(
+        Interoperability.facility_id.id == facility_obj.id,
+        Interoperability.created_by.id == user.id
+    ).sort("-created_at").to_list()
 
-    by_link = await Interoperability.find(Interoperability.facility_id.id == facility_obj.id).to_list()
-    by_str = await Interoperability.find(Interoperability.facility_id == str(facility_obj.id)).to_list()
 
-    seen = set()
-    docs = []
-    for d in by_link + by_str:
-        if str(d.id) in seen:
-            continue
-        seen.add(str(d.id))
-        docs.append(d)
+
+    # ---------------- RESPONSE ----------------
 
     result = [
         {
@@ -144,7 +147,7 @@ async def get_interoperabilities(
             "interoperability": _decrypt_json_field(ce, ip.interoperability),
             "created_at": ip.created_at,
             "updated_at": ip.updated_at,
-        } for ip in docs
+        } for ip in interopability
     ]
 
     try:

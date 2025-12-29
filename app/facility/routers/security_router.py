@@ -134,18 +134,23 @@ async def get_security_settings(
     if not facility_obj:
         raise HTTPException(status_code=404, detail="Facility not found")
 
+    # ---------------- ENCRYPTION ----------------
     ce = getattr(request.app, "client_encryption", None)
+    if ce is None:
+        ce = init_encryption()
+        request.app.client_encryption = ce
 
-    by_link = await SecurityDoc.find(SecurityDoc.facility_id.id == facility_obj.id).to_list()
-    by_str = await SecurityDoc.find(SecurityDoc.facility_id == str(facility_obj.id)).to_list()
+    # ---------------- Security  ----------------
+    security = await SecurityDoc.find(
+        SecurityDoc.facility_id.id == facility_obj.id,
+        SecurityDoc.created_by.id == user.id
+    ).sort("-created_at").to_list()
 
-    seen = set()
-    docs = []
-    for d in by_link + by_str:
-        if str(d.id) in seen:
-            continue
-        seen.add(str(d.id))
-        docs.append(d)
+
+    # ---------------- RESPONSE ----------------
+        
+
+    
 
     result = [
         {
@@ -157,7 +162,7 @@ async def get_security_settings(
             "privacy_policies": _decrypt_json_field(ce, sc.privacy_policies),
             "created_at": sc.created_at,
             "updated_at": sc.updated_at,
-        } for sc in docs
+        } for sc in security
     ]
 
     try:

@@ -131,18 +131,21 @@ async def get_state_reporting_identifiers(
     if not facility_obj:
         raise HTTPException(status_code=404, detail="Facility not found")
 
+     # ---------------- ENCRYPTION ----------------
     ce = getattr(request.app, "client_encryption", None)
+    if ce is None:
+        ce = init_encryption()
+        request.app.client_encryption = ce
 
-    by_link = await StateReportingIdentifiersDocs.find(StateReportingIdentifiersDocs.facility_id.id == facility_obj.id).to_list()
-    by_str = await StateReportingIdentifiersDocs.find(StateReportingIdentifiersDocs.facility_id == str(facility_obj.id)).to_list()
+     # ---------------- State Reporting  ----------------
+    state_reporting = await StateReportingIdentifiersDocs.find(
+        StateReportingIdentifiersDocs.facility_id.id == facility_obj.id,
+        StateReportingIdentifiersDocs.created_by.id == user.id
+    ).sort("-created_at").to_list()
 
-    seen = set()
-    docs = []
-    for d in by_link + by_str:
-        if str(d.id) in seen:
-            continue
-        seen.add(str(d.id))
-        docs.append(d)
+
+    # ---------------- RESPONSE ----------------
+
 
     result = [
         {
@@ -151,7 +154,7 @@ async def get_state_reporting_identifiers(
             "identifier_value": _decrypt_json_field(ce, item.identifier_value),
             "created_at": item.created_at,
             "updated_at": item.updated_at,
-        } for item in docs
+        } for item in state_reporting
     ]
 
     try:

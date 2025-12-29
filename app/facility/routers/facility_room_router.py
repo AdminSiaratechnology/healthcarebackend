@@ -121,37 +121,36 @@ async def get_facility_rooms(
     request: Request,
     current_user_id: str = Depends(get_current_user_id)
 ):
+    # ---------------- User ----------------
     user = await UserDoc.get(current_user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    facility_obj = None
+    # ---------------- Facility ----------------
     try:
-        facility_obj_id = PydanticObjectId(facility_id)
-        facility_obj = await Facility.get(facility_obj_id)
+        facility_obj = await Facility.get(PydanticObjectId(facility_id))
     except Exception:
-        pass
-
-    if facility_obj is None:
         facility_obj = await Facility.get(facility_id)
+
     if not facility_obj:
         raise HTTPException(status_code=404, detail="Facility not found")
 
-    ce = request.app.client_encryption
+    # ---------------- Encryption ----------------
+    ce = getattr(request.app, "client_encryption", None)
+    if ce is None:
+        ce = init_encryption()
+        request.app.client_encryption = ce
 
-    by_link = await FacilityRooms.find(FacilityRooms.facility_id.id == facility_obj.id).to_list()
-    by_str = await FacilityRooms.find(FacilityRooms.facility_id == str(facility_obj.id)).to_list()
+    # ---------------- Rooms (facility + created_by) ----------------
+    rooms = await FacilityRooms.find(
+        FacilityRooms.facility_id.id == facility_obj.id,
+        FacilityRooms.created_by.id == user.id
+    ).sort("created_at").to_list()
 
-    seen = set()
-    docs = []
-    for d in by_link + by_str:
-        if str(d.id) in seen:
-            continue
-        seen.add(str(d.id))
-        docs.append(d)
-
-    result = [
-        {
+    # ---------------- Response ----------------
+    result = []
+    for r in rooms:
+        result.append({
             "id": str(r.id),
             "room_id": _decrypt_value(ce, r.room_id),
             "room_type": _decrypt_value(ce, r.room_type),
@@ -162,9 +161,9 @@ async def get_facility_rooms(
             "floor_id": str(r.floor.id) if r.floor else None,
             "created_at": r.created_at,
             "updated_at": r.updated_at,
-        } for r in docs
-    ]
+        })
 
+    # ---------------- Audit ----------------
     try:
         await log_audit(
             request=request,
@@ -179,7 +178,6 @@ async def get_facility_rooms(
         pass
 
     return result
-
 
 
 
@@ -222,7 +220,10 @@ async def update_facility_room(
     current_room_id = _decrypt_value(ce, room_doc.room_id)
     current_type = _decrypt_value(ce, room_doc.room_type)
     current_wing = _decrypt_value(ce, room_doc.wing)
-    current_features = _decrypt_json_field(ce, room_doc.room_features)
+    try:
+        current_features = _decrypt_json_field(ce, room_doc.room_features)
+    except Exception:
+        current_features = None
     current_isolation = _decrypt_value(ce, room_doc.isolation_room)
     current_notes = _decrypt_value(ce, room_doc.notes)
 

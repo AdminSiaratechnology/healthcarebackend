@@ -147,18 +147,21 @@ async def get_workstations(
     if not facility_obj:
         raise HTTPException(status_code=404, detail="Facility not found")
 
+     # encrypt 
     ce = getattr(request.app, "client_encryption", None)
+    if ce is None:
+        ce = init_encryption()
+        request.app.client_encryption = ce
 
-    by_link = await WorkStation.find(WorkStation.facility_id.id == facility_obj.id).to_list()
-    by_str = await WorkStation.find(WorkStation.facility_id == str(facility_obj.id)).to_list()
+    # ---------------- Work Stations  ----------------
+    work_stations = await WorkStation.find(
+        WorkStation.facility_id.id == facility_obj.id,
+        WorkStation.created_by.id == user.id
+    ).sort("-created_at").to_list()
+   
+    
 
-    seen = set()
-    docs = []
-    for d in by_link + by_str:
-        if str(d.id) in seen:
-            continue
-        seen.add(str(d.id))
-        docs.append(d)
+    # response 
 
     result = [
         {
@@ -169,7 +172,7 @@ async def get_workstations(
             "peripherals": _decrypt_json_field(ce, ws.peripherals),
             "created_at": ws.created_at,
             "updated_at": ws.updated_at,
-        } for ws in docs
+        } for ws in work_stations
     ]
 
     try:

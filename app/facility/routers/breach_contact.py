@@ -108,10 +108,7 @@ async def get_breach_contacts(
     current_user_id: str = Depends(get_current_user_id),
 ):
     try:
-        ce = getattr(request.app, "client_encryption", None)
-        if ce is None:
-            ce = init_encryption()
-            request.app.client_encryption = ce
+        
 
         user = await UserDoc.get(current_user_id)
         if not user:
@@ -128,16 +125,21 @@ async def get_breach_contacts(
         if not facility_obj:
             raise HTTPException(status_code=404, detail="Facility not found")
 
-        by_link = await BrachResponseContactDocs.find(BrachResponseContactDocs.facility_id.id == facility_obj.id).to_list()
-        by_str = await BrachResponseContactDocs.find(BrachResponseContactDocs.facility_id == str(facility_obj.id)).to_list()
+        # ---------------- ENCRYPTION ----------------
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
 
-        seen = set()
-        docs = []
-        for d in by_link + by_str:
-            if str(d.id) in seen:
-                continue
-            seen.add(str(d.id))
-            docs.append(d)
+        # ---------------- Breach Contact  ----------------
+        breach_con = await BrachResponseContactDocs.find(
+            BrachResponseContactDocs.facility_id.id == facility_obj.id,
+            BrachResponseContactDocs.created_by.id == user.id
+        ).sort("-created_at").to_list()
+
+
+        # ---------------- RESPONSE ----------------
+        
 
         result = [
             {
@@ -148,7 +150,7 @@ async def get_breach_contacts(
                 "email": _decrypt_value(ce, bc.email),
                 "created_at": bc.created_at,
                 "updated_at": bc.updated_at,
-            } for bc in docs
+            } for bc in breach_con
         ]
 
         try:

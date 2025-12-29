@@ -7,7 +7,8 @@ from pydantic import ValidationError
 from app.facility.models.facility import Facility
 from app.accounts.models.user import UserDoc
 from app.auth.deps import get_current_user_id
-from app.encryption.encryption import encrypt_value, decrypt_value
+
+from app.encryption.encryption import encrypt_value, decrypt_value, init_encryption, ensure_data_key
 from app.utils.audit import log_audit
 from app.schemas.facilities.pharmacies import PharmaciesSchema
 from beanie import PydanticObjectId
@@ -121,19 +122,21 @@ async def get_pharmacies(
     if not facility_obj:
         raise HTTPException(status_code=404, detail="Facility not found")
 
-    ce = request.app.client_encryption
+    # ce = request.app.client_encryption
+    ce = getattr(request.app, "client_encryption", None)
+    if ce is None:
+        ce = init_encryption()
+        request.app.client_encryption = ce
 
-    by_link = await Pharmacies.find(Pharmacies.facility_id.id == facility_obj.id).to_list()
-    by_str = await Pharmacies.find(Pharmacies.facility_id == str(facility_obj.id)).to_list()
+    # ---------------- Pharmacy ----------------
+    pharmacy = await Pharmacies.find(
+        Pharmacies.facility_id.id == facility_obj.id,
+        Pharmacies.created_by.id == user.id
+    ).sort("-created_at").to_list()
 
-    seen = set()
-    docs = []
-    for d in by_link + by_str:
-        if str(d.id) in seen:
-            continue
-        seen.add(str(d.id))
-        docs.append(d)
+  
 
+    # ---------------- RESPONSE ----------------
     result = [
         {
             "id": str(ph.id),
@@ -146,9 +149,10 @@ async def get_pharmacies(
             "delivery_schedule": _decrypt_value(ce, ph.delivery_schedule),
             "created_at": ph.created_at,
             "updated_at": ph.updated_at,
-        } for ph in docs
+        } for ph in pharmacy
     ]
 
+    
     try:
         await log_audit(
             request=request,

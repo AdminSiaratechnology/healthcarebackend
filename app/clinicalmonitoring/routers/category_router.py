@@ -114,7 +114,10 @@ async def list_categories(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    cats = await CategoryDoc.find({}).to_list()
+    # cats = await CategoryDoc.find({}).to_list()
+    cats = await CategoryDoc.find(
+        CategoryDoc.created_by.id == user.id
+    ).sort("-created_at").to_list()
     items = []
     for c in cats:
         items.append({

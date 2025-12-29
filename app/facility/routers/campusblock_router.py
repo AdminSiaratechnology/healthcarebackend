@@ -164,8 +164,11 @@ async def get_campus_blocks(
         raise HTTPException(status_code=404, detail="Facility not found")
 
    
-    campus_blocks = await CampusBlock.find({"facility_id.$id": facility_obj.id}).to_list()
-    
+    # campus_blocks = await CampusBlock.find({"facility_id.$id": facility_obj.id}).to_list()
+    campus_blocks = await CampusBlock.find(
+    CampusBlock.facility_id.id == facility_obj.id,
+    CampusBlock.created_by.id == user.id
+    ).to_list()
 
     
     docs = []

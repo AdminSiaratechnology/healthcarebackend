@@ -135,6 +135,157 @@ async def create_template(
         raise HTTPException(status_code=500, detail="Internal Server Error while creating template")
 
 
+# @router.get("/list")
+# async def list_templates(
+#     request: Request,
+#     q: str | None = None,
+#     page: int = 1,
+#     page_size: int = 10,
+#     subcategory_id: str | None = None,
+#     category_id: str | None = None,
+#     patient_id: str | None = None,
+#     provider_id: str | None = None,
+#     current_user_id: str = Depends(get_current_user_id)
+# ):
+#     ce = getattr(request.app, "client_encryption", None)
+#     if ce is None:
+#         ce = init_encryption()
+#         request.app.client_encryption = ce
+
+#     user = await UserDoc.get(current_user_id)
+#     if not user:
+#         raise HTTPException(status_code=404, detail="User not found")
+
+#     base_query = {}
+#     if subcategory_id:
+#         try:
+#             subcat_doc = await SubcategoryDoc.get(PydanticObjectId(subcategory_id))
+#         except Exception:
+#             subcat_doc = None
+#         if not subcat_doc:
+#             raise HTTPException(status_code=404, detail="Subcategory not found")
+#         base_query = {"sub_category_id.$id": subcat_doc.id}
+#     elif category_id:
+#         try:
+#             cat_oid = PydanticObjectId(category_id)
+#         except Exception:
+#             raise HTTPException(status_code=400, detail="Invalid category_id")
+#         subcats = await SubcategoryDoc.find({"category_id.$id": cat_oid}).to_list()
+#         subcat_ids = [sc.id for sc in subcats]
+#         base_query = {"sub_category_id.$id": {"$in": subcat_ids}} if subcat_ids else {"sub_category_id.$id": {"$in": []}}
+
+#     if patient_id:
+#         try:
+#             p_oid = PydanticObjectId(patient_id)
+#         except Exception:
+#             raise HTTPException(status_code=400, detail="Invalid patient_id")
+#         base_query["patient_id.$id"] = p_oid
+
+#     if provider_id:
+#         try:
+#             prov_oid = PydanticObjectId(provider_id)
+#         except Exception:
+#             raise HTTPException(status_code=400, detail="Invalid provider_id")
+#         base_query["provider_id.$id"] = prov_oid
+
+    
+#     all_docs = await TemplateBuilderDoc.find(base_query).sort(-TemplateBuilderDoc.created_at).to_list()
+
+#     def matches(item_name: str | None, needle: str) -> bool:
+#         return item_name is not None and needle.lower() in item_name.lower()
+
+#     items = []
+#     for t in all_docs:
+#         name = _dec_str(ce, t.template_name)
+#         short = _dec_str(ce, t.short_name)
+#         disc = _dec_str(ce, t.discipline)
+
+#         # fetch subcategory name
+#         sc_name = None
+#         sc_id_str = None
+#         try:
+#             sc_id = t.sub_category_id.id if hasattr(t.sub_category_id, "id") else t.sub_category_id
+#             sc = await SubcategoryDoc.get(sc_id)
+#             if sc:
+#                 sc_name = _dec_str(ce, sc.name)
+#                 sc_id_str = str(sc.id)
+#         except Exception:
+#             pass
+
+#         if q:
+#             if not (
+#                 matches(name, q) or matches(sc_name, q) or matches(disc, q)
+#             ):
+#                 continue
+
+#         p_id_str = None
+#         try:
+#             p_id = None
+#             if hasattr(t.patient_id, "id"):
+#                 p_id = t.patient_id.id
+#             elif hasattr(getattr(t.patient_id, "ref", None), "id"):
+#                 p_id = t.patient_id.ref.id
+#             elif t.patient_id:
+#                 p_id = t.patient_id
+#             p_id_str = str(p_id) if p_id is not None else None
+#         except Exception:
+#             pass
+
+#         prov_id_str = None
+#         try:
+#             pr_id = None
+#             if hasattr(t.provider_id, "id"):
+#                 pr_id = t.provider_id.id
+#             elif hasattr(getattr(t.provider_id, "ref", None), "id"):
+#                 pr_id = t.provider_id.ref.id
+#             elif t.provider_id:
+#                 pr_id = t.provider_id
+#             prov_id_str = str(pr_id) if pr_id is not None else None
+#         except Exception:
+#             pass
+
+#         items.append({
+#             "id": str(t.id),
+#             "template_name": name,
+#             "short_name": short,
+#             "discipline": disc,
+#             "subcategory_id": sc_id_str,
+#             "subcategory_name": sc_name,
+#             "patient_id": p_id_str,
+#             "provider_id": prov_id_str,
+#             "created_at": t.created_at,
+#             "updated_at": t.updated_at,
+#         })
+
+#     total = len(items)
+#     start = max((page - 1) * page_size, 0)
+#     end = start + page_size
+#     paged = items[start:end]
+
+#     try:
+#         await log_audit(
+#             request=request,
+#             user_id=str(user.id),
+#             action="Read",
+#             resource="TemplateBuilder",
+#             resource_id="list",
+#             status="success",
+#             notes="Templates listed",
+#         )
+#     except Exception:
+#         pass
+
+#     return {
+#         "data": paged,
+#         "meta": {
+#             "total": total,
+#             "page": page,
+#             "page_size": page_size,
+#             "pages": (total + page_size - 1) // page_size,
+#         }
+#     }
+
+
 @router.get("/list")
 async def list_templates(
     request: Request,
@@ -147,59 +298,85 @@ async def list_templates(
     provider_id: str | None = None,
     current_user_id: str = Depends(get_current_user_id)
 ):
+    # ---------------- Encryption ----------------
     ce = getattr(request.app, "client_encryption", None)
     if ce is None:
         ce = init_encryption()
         request.app.client_encryption = ce
 
+    # ---------------- User ----------------
     user = await UserDoc.get(current_user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    base_query = {}
+    # ---------------- Base Query ----------------
+    base_query: dict = {}
+
+    # 🔒 IMPORTANT: only user-created templates
+    base_query["created_by.$id"] = user.id
+
+    # ---------------- Subcategory filter ----------------
     if subcategory_id:
         try:
             subcat_doc = await SubcategoryDoc.get(PydanticObjectId(subcategory_id))
         except Exception:
             subcat_doc = None
+
         if not subcat_doc:
             raise HTTPException(status_code=404, detail="Subcategory not found")
-        base_query = {"sub_category_id.$id": subcat_doc.id}
+
+        base_query["sub_category_id.$id"] = subcat_doc.id
+
+    # ---------------- Category filter ----------------
     elif category_id:
         try:
             cat_oid = PydanticObjectId(category_id)
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid category_id")
-        subcats = await SubcategoryDoc.find({"category_id.$id": cat_oid}).to_list()
-        subcat_ids = [sc.id for sc in subcats]
-        base_query = {"sub_category_id.$id": {"$in": subcat_ids}} if subcat_ids else {"sub_category_id.$id": {"$in": []}}
 
+        subcats = await SubcategoryDoc.find(
+            {"category_id.$id": cat_oid}
+        ).to_list()
+
+        subcat_ids = [sc.id for sc in subcats]
+        base_query["sub_category_id.$id"] = {"$in": subcat_ids} if subcat_ids else {"$in": []}
+
+    # ---------------- Patient filter ----------------
     if patient_id:
         try:
             p_oid = PydanticObjectId(patient_id)
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid patient_id")
+
         base_query["patient_id.$id"] = p_oid
 
+    # ---------------- Provider filter ----------------
     if provider_id:
         try:
             prov_oid = PydanticObjectId(provider_id)
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid provider_id")
+
         base_query["provider_id.$id"] = prov_oid
 
-    all_docs = await TemplateBuilderDoc.find(base_query).sort(-TemplateBuilderDoc.created_at).to_list()
+    # ---------------- Fetch data ----------------
+    all_docs = await TemplateBuilderDoc.find(
+        base_query
+    ).sort(-TemplateBuilderDoc.created_at).to_list()
 
+    # ---------------- Search helper ----------------
     def matches(item_name: str | None, needle: str) -> bool:
         return item_name is not None and needle.lower() in item_name.lower()
 
+    # ---------------- Build response ----------------
     items = []
+
     for t in all_docs:
         name = _dec_str(ce, t.template_name)
         short = _dec_str(ce, t.short_name)
         disc = _dec_str(ce, t.discipline)
 
-        # fetch subcategory name
+        # ---- Subcategory info ----
         sc_name = None
         sc_id_str = None
         try:
@@ -211,35 +388,32 @@ async def list_templates(
         except Exception:
             pass
 
+        # ---- Search filter ----
         if q:
             if not (
-                matches(name, q) or matches(sc_name, q) or matches(disc, q)
+                matches(name, q) or
+                matches(sc_name, q) or
+                matches(disc, q)
             ):
                 continue
 
+        # ---- Patient ID ----
         p_id_str = None
         try:
-            p_id = None
             if hasattr(t.patient_id, "id"):
-                p_id = t.patient_id.id
-            elif hasattr(getattr(t.patient_id, "ref", None), "id"):
-                p_id = t.patient_id.ref.id
+                p_id_str = str(t.patient_id.id)
             elif t.patient_id:
-                p_id = t.patient_id
-            p_id_str = str(p_id) if p_id is not None else None
+                p_id_str = str(t.patient_id)
         except Exception:
             pass
 
+        # ---- Provider ID ----
         prov_id_str = None
         try:
-            pr_id = None
             if hasattr(t.provider_id, "id"):
-                pr_id = t.provider_id.id
-            elif hasattr(getattr(t.provider_id, "ref", None), "id"):
-                pr_id = t.provider_id.ref.id
+                prov_id_str = str(t.provider_id.id)
             elif t.provider_id:
-                pr_id = t.provider_id
-            prov_id_str = str(pr_id) if pr_id is not None else None
+                prov_id_str = str(t.provider_id)
         except Exception:
             pass
 
@@ -256,11 +430,13 @@ async def list_templates(
             "updated_at": t.updated_at,
         })
 
+    # ---------------- Pagination ----------------
     total = len(items)
     start = max((page - 1) * page_size, 0)
     end = start + page_size
     paged = items[start:end]
 
+    # ---------------- Audit log ----------------
     try:
         await log_audit(
             request=request,
@@ -269,11 +445,12 @@ async def list_templates(
             resource="TemplateBuilder",
             resource_id="list",
             status="success",
-            notes="Templates listed",
+            notes="User templates listed",
         )
     except Exception:
         pass
 
+    # ---------------- Response ----------------
     return {
         "data": paged,
         "meta": {

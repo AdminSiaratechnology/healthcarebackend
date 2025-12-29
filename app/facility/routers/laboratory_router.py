@@ -7,7 +7,7 @@ from pydantic import ValidationError
 from app.facility.models.facility import Facility
 from app.accounts.models.user import UserDoc
 from app.auth.deps import get_current_user_id
-from app.encryption.encryption import encrypt_value, decrypt_value
+from app.encryption.encryption import encrypt_value, decrypt_value, init_encryption
 from app.utils.audit import log_audit
 from app.schemas.facilities.laboratory import LaboratorySchema
 from beanie import PydanticObjectId
@@ -124,18 +124,18 @@ async def get_laboratories(
     if not facility_obj:
         raise HTTPException(status_code=404, detail="Facility not found")
 
-    ce = request.app.client_encryption
+    ce = getattr(request.app, "client_encryption", None)
+    if ce is None:
+        ce = init_encryption()
+        request.app.client_encryption = ce
 
-    by_link = await Laboratory.find(Laboratory.facility_id.id == facility_obj.id).to_list()
-    by_str = await Laboratory.find(Laboratory.facility_id == str(facility_obj.id)).to_list()
-
-    seen = set()
-    docs = []
-    for d in by_link + by_str:
-        if str(d.id) in seen:
-            continue
-        seen.add(str(d.id))
-        docs.append(d)
+    # ---------------- Laboratory  ----------------
+    laboratory = await Laboratory.find(
+        Laboratory.facility_id.id == facility_obj.id,
+        Laboratory.created_by.id == user.id
+    ).sort("-created_at").to_list()
+   
+   
 
     result = [
         {
@@ -148,7 +148,7 @@ async def get_laboratories(
             "loinc_policy": _decrypt_value(ce, lb.loinc_policy),
             "created_at": lb.created_at,
             "updated_at": lb.updated_at,
-        } for lb in docs
+        } for lb in laboratory
     ]
 
     try:

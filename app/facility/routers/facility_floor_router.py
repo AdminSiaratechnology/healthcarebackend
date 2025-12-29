@@ -134,7 +134,11 @@ async def get_facility_floors(
     if not facility_obj:
         raise HTTPException(status_code=404, detail="Facility not found")
     
-    floor = await FacilityFloor.find({"facility_id.$id": facility_obj.id}).to_list()
+    # floor = await FacilityFloor.find({"facility_id.$id": facility_obj.id}).to_list()
+    floor = await FacilityFloor.find(
+    FacilityFloor.facility_id.id == facility_obj.id,
+    FacilityFloor.created_by.id == user.id
+    ).to_list()
 
     
     items = []

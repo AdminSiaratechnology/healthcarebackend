@@ -119,16 +119,22 @@ async def get_quality_reporting(
         if not facility_obj:
             raise HTTPException(status_code=404, detail="Facility not found")
 
-        by_link = await QualityReportingDoc.find(QualityReportingDoc.facility_id.id == facility_obj.id).to_list()
-        by_str = await QualityReportingDoc.find(QualityReportingDoc.facility_id == str(facility_obj.id)).to_list()
+        
+        # ---------------- ENCRYPTION ----------------
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
 
-        seen = set()
-        docs = []
-        for d in by_link + by_str:
-            if str(d.id) in seen:
-                continue
-            seen.add(str(d.id))
-            docs.append(d)
+        # ---------------- QUALITY - REPORT ----------------
+        quality_rep = await QualityReportingDoc.find(
+            QualityReportingDoc.facility_id.id == facility_obj.id,
+            QualityReportingDoc.created_by.id == user.id
+        ).sort("-created_at").to_list()
+
+
+        # ---------------- RESPONSE ----------------
+
 
         result = [
             {
@@ -137,7 +143,7 @@ async def get_quality_reporting(
                 "reporting_cadence": _decrypt_value(ce, qr.reporting_cadence),
                 "created_at": qr.created_at,
                 "updated_at": qr.updated_at,
-            } for qr in docs
+            } for qr in quality_rep
         ]
 
         try:

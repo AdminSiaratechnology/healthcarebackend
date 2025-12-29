@@ -143,18 +143,22 @@ async def get_quality_settings(
     if not facility_obj:
         raise HTTPException(status_code=404, detail="Facility not found")
 
+    # ---------------- ENCRYPTION ----------------
     ce = getattr(request.app, "client_encryption", None)
+    if ce is None:
+        ce = init_encryption()
+        request.app.client_encryption = ce
 
-    by_link = await QualityDoc.find(QualityDoc.facility_id.id == facility_obj.id).to_list()
-    by_str = await QualityDoc.find(QualityDoc.facility_id == str(facility_obj.id)).to_list()
+    # ---------------- QUALITY  ----------------
+    quality = await QualityDoc.find(
+        QualityDoc.facility_id.id == facility_obj.id,
+        QualityDoc.created_by.id == user.id
+    ).sort("-created_at").to_list()
 
-    seen = set()
-    docs = []
-    for d in by_link + by_str:
-        if str(d.id) in seen:
-            continue
-        seen.add(str(d.id))
-        docs.append(d)
+
+    # ---------------- RESPONSE ----------------
+
+    
 
     result = [
         {
@@ -165,7 +169,7 @@ async def get_quality_settings(
             "fall_risk_program": _decrypt_value(ce, q.fall_risk_program),
             "created_at": q.created_at,
             "updated_at": q.updated_at,
-        } for q in docs
+        } for q in quality
     ]
 
     try:
