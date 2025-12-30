@@ -265,10 +265,10 @@ async def list_providers(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # docs = await Provider.find({}).sort("-created_at").to_list()
-    docs = await Provider.find(
-        {"user_id": str(user.id)}
-    ).sort("-created_at").to_list()
+    docs = await Provider.find({}).sort("-created_at").to_list()
+    # docs = await Provider.find(
+    #     {"user_id": str(user.id)}
+    # ).sort("-created_at").to_list()
 
 
     items = []
