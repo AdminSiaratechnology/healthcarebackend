@@ -8,7 +8,7 @@ from app.database.config import settings
 def _get_jwt_settings():
     secret = getattr(settings, "JWT_SECRET", None) or os.environ.get("JWT_SECRET")
     alg = getattr(settings, "JWT_ALGORITHM", "HS256")
-    ttl_min = getattr(settings, "ACCESS_TOKEN_EXPIRE_MINUTES", 60)
+    ttl_min = getattr(settings, "ACCESS_TOKEN_EXPIRE_MINUTES", 525600)
     if not secret:
         raise HTTPException(status_code=500, detail="Server misconfigured: JWT_SECRET not set")
     try:

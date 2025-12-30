@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     AWS_SECRET_ACCESS_KEY: str | None = None
     JWT_SECRET: str | None = None
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 525600
     SMTP_HOST: str | None = None
     SMTP_PORT: int | None = 587
     SMTP_USER: str | None = None
