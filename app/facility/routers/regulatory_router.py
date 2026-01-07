@@ -164,9 +164,7 @@ async def get_regulatory_info(
             "id": str(rg.id),
             "state_license": _decrypt_json_field(ce, rg.state_license),
             "federal_certification": _decrypt_json_field(ce, rg.federal_certification),
-            "accreditations": _decrypt_json_field(ce, rg.accreditations),
             "onc_certification": _decrypt_json_field(ce, rg.onc_certification),
-            "state_reporting_identifier": _decrypt_json_field(ce, rg.state_reporting_identifier),
             "created_at": rg.created_at,
             "updated_at": rg.updated_at,
         } for rg in regulatory
