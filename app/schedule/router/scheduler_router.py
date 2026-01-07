@@ -203,3 +203,104 @@ async def get_schedule_by_id(
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.put("/update/{schedule_id}/")
+async def update_schedule(
+    schedule_id: str,
+    payload: ScheduleSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    try:
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+            request.app.dek_id = dek_id
+
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        sched = None
+        try:
+            s_oid = PydanticObjectId(schedule_id)
+            sched = await SchedulerDoc.get(s_oid)
+        except Exception:
+            sched = await SchedulerDoc.get(schedule_id)
+
+        if not sched:
+            raise HTTPException(status_code=404, detail="Schedule not found")
+
+        facility_obj = None
+        try:
+            fac_oid = PydanticObjectId(payload.facility_id)
+            facility_obj = await Facility.get(fac_oid)
+        except Exception:
+            facility_obj = await Facility.get(payload.facility_id)
+        if not facility_obj:
+            raise HTTPException(status_code=404, detail="Facility not found")
+
+        provider_obj = None
+        try:
+            prov_oid = PydanticObjectId(payload.provider_id)
+            provider_obj = await Provider.get(prov_oid)
+        except Exception:
+            provider_obj = await Provider.get(payload.provider_id)
+        if not provider_obj:
+            raise HTTPException(status_code=404, detail="Provider not found")
+
+        sel_date_enc = encrypt_value(ce, dek_id, payload.selected_date.isoformat()) if payload.selected_date else None
+        shift_payload = None
+        if payload.shift_time is not None:
+            try:
+                shift_payload = json.dumps(payload.shift_time.model_dump(mode="json"))
+            except Exception:
+                shift_payload = json.dumps(payload.shift_time)
+        shift_enc = encrypt_value(ce, dek_id, shift_payload) if shift_payload is not None else None
+        dept_val = getattr(payload.department, "value", str(payload.department)) if payload.department is not None else None
+        dept_enc = encrypt_value(ce, dek_id, dept_val) if dept_val is not None else None
+        recurring_enc = encrypt_value(ce, dek_id, payload.is_create_recurring_shift) if payload.is_create_recurring_shift is not None else None 
+        sched.provider_id = provider_obj
+        sched.facility_id = facility_obj
+        sched.selected_date = sel_date_enc
+        sched.shift_time = shift_enc
+        sched.department = dept_enc
+        sched.is_create_recurring_shift = recurring_enc
+        sched.updated_at = datetime.now(timezone.utc)
+        await sched.save()
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(user.id),
+                action="Update",
+                resource="Scheduler",
+                resource_id=str(sched.id),
+                status="success",
+                notes="Schedule updated",
+            )
+        except Exception:
+            pass        
+        return {"id": str(sched.id)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await log_audit(
+                request=request,
+                user_id=current_user_id,
+                action="Update",
+                resource="Scheduler",
+                resource_id=schedule_id,
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))
+    

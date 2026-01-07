@@ -57,6 +57,6 @@ class StateReportingIdentifier(BaseModel):
 class RegulatorySchema(BaseModel):
     state_license: Optional[StateLicense]
     federal_certification: Optional[FederalCertification]
-    accreditations: List[Accreditation] = Field(default_factory=list)
+    # accreditations: List[Accreditation] = Field(default_factory=list)
     onc_certification: Optional[ONCCertification]
-    state_reporting_identifier: List[StateReportingIdentifier] = Field(default_factory=list)
+    # state_reporting_identifier: List[StateReportingIdentifier] = Field(default_factory=list)
