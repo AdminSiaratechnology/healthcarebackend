@@ -11,9 +11,6 @@ from app.encryption.encryption import encrypt_value, decrypt_value, init_encrypt
 from app.utils.audit import log_audit
 from app.schemas.facilities.laboratory import LaboratorySchema
 from beanie import PydanticObjectId
-
-import json
-import os
 from app.facility.models.laboratory import Laboratory
 
 router = APIRouter(prefix="/facility", tags=["Facility"])
@@ -165,3 +162,66 @@ async def get_laboratories(
         pass
 
     return result
+
+
+@router.put("/update/laboratory/{laboratory_id}/")
+async def update_laboratory(
+    laboratory_id: str,
+    lab: LaboratorySchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    try:
+        client_encryption = request.app.client_encryption
+        dek_id = request.app.dek_id
+
+        def enc_or_none(val):
+            if val is None:
+                return None
+            if hasattr(val, "value"):
+                val = val.value
+            return encrypt_value(client_encryption, dek_id, val)
+
+        laboratory = await Laboratory.get(PydanticObjectId(laboratory_id))
+        if not laboratory:
+            raise HTTPException(status_code=404, detail="Laboratory not found")
+
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        laboratory.laboratory_name = enc_or_none(lab.laboratory_name)
+        laboratory.phone = enc_or_none(lab.phone)
+        laboratory.fax = enc_or_none(lab.fax)
+        laboratory.pickup_schedule = enc_or_none(lab.pickup_schedule)
+        laboratory.interface_type = enc_or_none(lab.interface_type)
+        laboratory.loinc_policy = enc_or_none(lab.loinc_policy)
+        laboratory.updated_at = datetime.now(timezone.utc)
+
+        await laboratory.save()
+
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(user.id),
+                action="Update",
+                resource="Laboratory",
+                resource_id=str(laboratory.id),
+                status="success",
+                notes="Laboratory updated successfully",
+            )
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "laboratory_id": str(laboratory.id),
+        }
+
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Internal Server Error while updating laboratory"
+        )   

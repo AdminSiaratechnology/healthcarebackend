@@ -190,3 +190,80 @@ async def get_network_configs(
         pass
 
     return result
+
+
+@router.put("/update/network-config/{config_id}/")
+async def update_network_config(
+    config_id: str,
+    payload: NetworkConfigSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    try:
+        client_encryption = getattr(request.app, "client_encryption", None)
+        if client_encryption is None:
+            client_encryption = init_encryption()
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+
+        def enc_or_none(val):
+            return encrypt_value(client_encryption, dek_id, val) if val is not None else None
+
+        def enc_json_or_none(obj):
+            return (
+                encrypt_value(client_encryption, dek_id, json.dumps(obj.model_dump()))
+                if obj is not None else None
+            )
+
+        cfg_doc = await NetworkConfig.get(config_id)
+        if not cfg_doc:
+            raise HTTPException(status_code=404, detail="Network Config not found")
+
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        cfg_doc.primary_isp = enc_or_none(payload.primary_isp)
+        cfg_doc.secondary_isp = enc_or_none(payload.secondary_isp)
+        cfg_doc.bandwidth = enc_or_none(payload.bandwidth)
+        cfg_doc.vpn_required = enc_or_none(payload.vpn_required)
+        cfg_doc.printer_routing_map = enc_json_or_none(payload.printer_routing_map)
+        cfg_doc.updated_at = datetime.now(timezone.utc)
+
+        await cfg_doc.save()
+
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(user.id),
+                action="Update",
+                resource="Network Config",
+                resource_id=str(cfg_doc.id),
+                status="success",
+                notes="Network configuration updated successfully",
+            )
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "network_config_id": str(cfg_doc.id),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="Network Config",
+                resource_id="N/A",
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Internal Server Error while updating network config")

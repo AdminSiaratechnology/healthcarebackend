@@ -175,3 +175,68 @@ async def get_transport_vendors(
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.put("/transport-vendor/update/{vendor_id}/")
+async def update_transport_vendor(
+    vendor_id: str,
+    payload: TransportVendorSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    try:
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+            request.app.dek_id = dek_id
+
+        vendor_obj_id = PydanticObjectId(vendor_id)
+        vendor_doc = await TransportVendorDocs.get(vendor_obj_id)
+        if not vendor_doc:
+            raise HTTPException(status_code=404, detail="Transport Vendor not found")
+
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        if payload.vendor_name is not None:
+            vendor_doc.vendor_name = encrypt_value(ce, dek_id, payload.vendor_name)
+        if payload.contact_number is not None:
+            vendor_doc.contact_number = encrypt_value(ce, dek_id, payload.contact_number)
+
+        vendor_doc.updated_at =  datetime.now(timezone.utc)
+
+        await vendor_doc.save()
+
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Update",
+            resource="Transport Vendor",
+            resource_id=str(vendor_doc.id),
+            status="success",
+            notes="Transport vendor updated",
+        )
+
+        return {"status":"success","id": str(vendor_doc.id)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await log_audit(
+                request=request,
+                user_id=current_user_id,
+                action="Update",
+                resource="Transport Vendor",
+                resource_id=vendor_id,
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e)) 

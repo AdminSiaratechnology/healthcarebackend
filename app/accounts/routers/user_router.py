@@ -136,9 +136,6 @@ async def user_registrations(users: Users, request: Request):
             )
             admin_doc = Admin(user=user, user_id=str(user.id), profile=encrypted_profile)
             await admin_doc.insert()
-        # raw = decrypt_value(client_encryption, user.role)
-        # role = raw.decode("utf-8") if isinstance(raw, bytes) else raw
-        # print("rolessssssss",role)
         
 
         await log_audit(

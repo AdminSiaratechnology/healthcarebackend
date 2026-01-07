@@ -12,6 +12,7 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str
+    is_google_auth_enabled: bool = False
 
 class ProfileResponse(BaseModel):
     id: str

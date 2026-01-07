@@ -141,3 +141,85 @@ async def list_categories(
         pass
 
     return items
+
+
+
+
+@router.put("/update/category/{category_id}/")
+async def update_category(
+    category_id: str,
+    cat: CategorySchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    try:
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+            request.app.dek_id = dek_id
+
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        doc = await CategoryDoc.get(PydanticObjectId(category_id))
+        if not doc:
+            raise HTTPException(status_code=404, detail="Category not found")
+
+        # Check for existing category with the same name (deterministic compare)
+        enc_name_det = encrypt_value_deterministic(ce, dek_id, cat.name)
+        existing = await CategoryDoc.find_one({"name": enc_name_det, "_id": {"$ne": doc.id}})
+        
+        if not existing:
+            cats = await CategoryDoc.find({}).to_list()
+            for c in cats:
+                if c.id != doc.id and _dec_str(ce, c.name) == cat.name:
+                    existing = c
+                    break
+            
+        if existing:
+            return {"message": "Category with this name already exists", "id": str(existing.id)}
+
+        doc.name = enc_name_det
+        doc.updated_at = datetime.now(timezone.utc)
+        await doc.save()
+
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(user.id),
+                action="Update",
+                resource="Category",
+                resource_id=str(doc.id),
+                status="success",
+                notes="Category updated",
+            )
+        except Exception:
+            pass
+
+        return {"id": str(doc.id)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="Category",
+                resource_id=category_id,
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Internal Server Error while updating category")    
+
+
+
+
+

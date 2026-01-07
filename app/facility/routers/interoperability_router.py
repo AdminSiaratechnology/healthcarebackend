@@ -164,3 +164,71 @@ async def get_interoperabilities(
         pass
 
     return result
+
+
+
+@router.put("/update/interoperability/{interop_id}/")
+async def update_interoperability(
+    interop_id: str,
+    payload: InteroperabilitySchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    try:
+        client_encryption = getattr(request.app, "client_encryption", None)
+        if client_encryption is None:
+            client_encryption = init_encryption()
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+
+        def enc_struct(obj):
+            return encrypt_value(client_encryption, dek_id, json.dumps(obj.model_dump()))
+
+        interop_doc = await Interoperability.get(PydanticObjectId(interop_id))
+        if not interop_doc:
+            raise HTTPException(status_code=404, detail="Interoperability record not found")
+
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        interop_doc.interoperability = enc_struct(payload)
+        interop_doc.updated_at = datetime.now(timezone.utc)
+
+        await interop_doc.save()
+
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(user.id),
+                action="Update",
+                resource="Interoperability",
+                resource_id=str(interop_doc.id),
+                status="success",
+                notes="Interoperability updated successfully",
+            )
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "interoperability_id": str(interop_doc.id),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="Interoperability",
+                resource_id=interop_id,
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Internal Server Error while updating interoperability")

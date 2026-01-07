@@ -171,3 +171,73 @@ async def get_device_inventories(
         pass
 
     return result
+
+
+
+@router.put("/update/device-inventory/{device_id}/")
+async def update_device_inventory(
+    device_id: str,
+    payload: DeviceInventorySchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    try:
+        client_encryption = getattr(request.app, "client_encryption", None)
+        if client_encryption is None:
+            client_encryption = init_encryption()
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+
+        def enc_or_none(val):
+            if val is None:
+                return None
+            if hasattr(val, "value"):
+                val = val.value
+            return encrypt_value(client_encryption, dek_id, val)
+
+        device_doc = await DeviceInventory.get(device_id)
+        if not device_doc:
+            raise HTTPException(status_code=404, detail="Device Inventory not found")
+
+        device_doc.device_type = enc_or_none(payload.device_type)
+        device_doc.counts = enc_or_none(payload.count)
+        device_doc.operating_system = enc_or_none(payload.operating_system)
+        device_doc.updated_at = datetime.now(timezone.utc)
+
+        await device_doc.save()
+
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="Device Inventory",
+                resource_id=str(device_doc.id),
+                status="success",
+                notes="Device inventory updated successfully",
+            )
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "device_inventory_id": str(device_doc.id),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="Device Inventory",
+                resource_id=device_id,
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Internal Server Error while updating device inventory")

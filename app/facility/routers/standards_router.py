@@ -179,3 +179,81 @@ async def get_standards(
         pass
 
     return result
+
+
+
+@router.put("/update/standards/{standards_id}/")
+async def update_standards(
+    standards_id: str,
+    payload: FacilityStandardsSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    try:
+        client_encryption = getattr(request.app, "client_encryption", None)
+        if client_encryption is None:
+            client_encryption = init_encryption()
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+
+        def enc_json_or_none(obj):
+            return (
+                encrypt_value(
+                    client_encryption,
+                    dek_id,
+                    json.dumps(obj.model_dump(mode="json"))
+                ) if obj is not None else None
+            )
+
+        standards_obj = await StandardsDoc.get(standards_id)
+        if not standards_obj:
+            raise HTTPException(status_code=404, detail="Standards record not found")
+
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        standards_obj.diagnosis_coding = enc_json_or_none(payload.diagnosis_coding)
+        standards_obj.procedure_coding = enc_json_or_none(payload.procedure_coding)
+        standards_obj.laboratory_coding = enc_json_or_none(payload.laboratory_coding)
+        standards_obj.allergy_coding = enc_json_or_none(payload.allergy_coding)
+        standards_obj.terminology_update = enc_json_or_none(payload.terminology_update)
+        standards_obj.updated_at = datetime.now(timezone.utc)
+
+        await standards_obj.save()
+
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(user.id),
+                action="Update",
+                resource="Standards",
+                resource_id=str(standards_obj.id),
+                status="success",
+                notes="Facility standards updated successfully",
+            )
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "standards_id": str(standards_obj.id),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="Standards",
+                resource_id=standards_id,
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Internal Server Error while updating standards")

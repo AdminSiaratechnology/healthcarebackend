@@ -192,6 +192,8 @@ async def create_user_and_provider(
             role=encrypted_provider_role,
             profile_pic=encrypted_profile_pic_key,
             signature=encrypted_signature_key,
+            created_by=current_user,
+            
 
         )
         await provider_doc.insert()
@@ -265,11 +267,23 @@ async def list_providers(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    docs = await Provider.find({}).sort("-created_at").to_list()
-    # docs = await Provider.find(
-    #     {"user_id": str(user.id)}
-    # ).sort("-created_at").to_list()
+    role_val = None
+    if user.role is not None:
+        try:
+            raw = decrypt_value(ce, user.role)
+            role_val = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw
+        except Exception:
+            role_val = None
 
+    is_super_admin = role_val == UserRole.SUPER_ADMIN.value
+    is_admin = role_val == UserRole.ADMIN.value or is_super_admin
+    
+    docs = (
+        await Provider.find(Provider.created_by.id == user.id)
+        .sort("-created_at")
+        .to_list()
+    )
+    
 
     items = []
     
@@ -281,6 +295,17 @@ async def list_providers(
             await p.fetch_links()
         except Exception:
             pass
+
+        role_val_user = None
+        if user.role is not None:
+            try:
+                raw = decrypt_value(ce, user.role)
+                role_val_user = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw
+            except Exception:
+                role_val_user = None
+
+        is_super_admin = role_val_user == UserRole.SUPER_ADMIN.value
+        is_admin = role_val_user == UserRole.ADMIN.value or is_super_admin
 
         u = getattr(p, "user", None)
         uid = None
@@ -294,6 +319,24 @@ async def list_providers(
             uid = None
         if not uid:
             uid = getattr(p, "user_id", None)
+
+        if not is_super_admin:
+            if is_admin:
+                created_by_id = None
+                cb = getattr(p, "created_by", None)
+                try:
+                    if cb and getattr(cb, "id", None):
+                        created_by_id = str(cb.id)
+                    else:
+                        refcb = getattr(cb, "ref", None) if cb is not None else None
+                        created_by_id = str(getattr(refcb, "id", None)) if refcb is not None else None
+                except Exception:
+                    created_by_id = None
+                if not created_by_id or created_by_id != str(user.id):
+                    raise HTTPException(status_code=403, detail="Forbidden")
+            else:
+                if uid != str(user.id):
+                    raise HTTPException(status_code=403, detail="Forbidden")
 
         full_name = None
         email = None
@@ -728,3 +771,143 @@ async def list_providers_by_facility(
         "total": total,
         "pages": pages,
     }
+
+
+@router.put("/update/{provider_id}")
+async def update_user_and_provider(
+    provider_id: str,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+    profile_pic: UploadFile | None = File(None),
+    signature: UploadFile | None = File(None),
+    full_name: str | None = Form(None),
+    email: EmailStr | None = Form(None),
+    phone: str | None = Form(None),
+    password: str | None = Form(None),
+    provider_form: dict = Depends(ProviderForm),
+):
+    try:
+        # ------------------------------------
+        # Encryption init
+        # ------------------------------------
+        ce = getattr(request.app, "client_encryption", None) or init_encryption()
+        request.app.client_encryption = ce
+
+        dek_id = getattr(request.app, "dek_id", None) or ensure_data_key()
+        request.app.dek_id = dek_id
+
+        # ------------------------------------
+        # Validate current user (admin)
+        # ------------------------------------
+        current_user = await UserDoc.get(current_user_id)
+        if not current_user:
+            raise HTTPException(404, "Current user not found")
+
+        # role_raw = decrypt_value(ce, current_user.role)
+        # role = role_raw.decode() if isinstance(role_raw, (bytes, bytearray)) else role_raw
+
+        # if role not in {UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value}:
+        #     raise HTTPException(403, "Only admin can update provider users")
+
+        # ------------------------------------
+        # Fetch Provider + User
+        # ------------------------------------
+        provider = await Provider.get(provider_id)
+        if not provider:
+            raise HTTPException(404, "Provider not found")
+
+        user = await UserDoc.get(provider.user_id)
+        if not user:
+            raise HTTPException(404, "Linked user not found")
+
+        # ------------------------------------
+        # Update USER fields
+        # ------------------------------------
+        if full_name:
+            user.full_name = encrypt_value(ce, dek_id, full_name)
+
+        if email:
+            user.email = encrypt_value_deterministic(ce, dek_id, email)
+
+        if phone:
+            user.phone = encrypt_value_deterministic(ce, dek_id, phone)
+
+        if password:
+            user.password = encrypt_value(ce, dek_id, hash_password(password))
+
+        await user.save()
+
+        # ------------------------------------
+        # Update Provider profile JSON
+        # ------------------------------------
+        if provider_form:
+            payload = {
+                k: (v.value if hasattr(v, "value") else v)
+                for k, v in provider_form.items()
+                if v is not None
+            }
+            provider.profile = encrypt_value(ce, dek_id, json.dumps(payload))
+
+            if provider_form.get("role"):
+                provider.role = encrypt_value(
+                    ce, dek_id, provider_form["role"].value
+                )
+
+        # ------------------------------------
+        # Upload updated files (S3)
+        # ------------------------------------
+        s3 = s3_client()
+        bucket = get_bucket_name()
+
+        folder_name = safe_folder_name(
+            full_name or decrypt_value(ce, user.full_name)
+        )
+        provider_folder = f"{folder_name}({user.id})"
+
+        if profile_pic:
+            file_bytes = await profile_pic.read()
+            if file_bytes:
+                key = f"{provider_folder}/profile/{safe_filename(profile_pic.filename)}"
+                put_object(s3, bucket, key, file_bytes, profile_pic.content_type)
+                provider.profile_pic = encrypt_value(ce, dek_id, key)
+
+        if signature:
+            file_bytes = await signature.read()
+            if file_bytes:
+                key = f"{provider_folder}/signature/{safe_filename(signature.filename)}"
+                put_object(s3, bucket, key, file_bytes, signature.content_type)
+                provider.signature = encrypt_value(ce, dek_id, key)
+
+        await provider.save()
+
+        # ------------------------------------
+        # Audit Log
+        # ------------------------------------
+        await log_audit(
+            request=request,
+            user_id=current_user_id,
+            action="UPDATE",
+            resource="provider_user",
+            resource_id=str(provider.id),
+            status="success",
+            notes="Provider + User updated",
+        )
+
+        return {
+            "message": "Provider user updated successfully",
+            "provider_id": str(provider.id),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        await log_audit(
+            request=request,
+            user_id=current_user_id,
+            action="UPDATE",
+            resource="provider_user",
+            resource_id=provider_id,
+            status="failed",
+            notes=f"{type(e).__name__}: {e!r}",
+        )
+        raise HTTPException(500, str(e))

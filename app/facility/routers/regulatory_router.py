@@ -186,3 +186,85 @@ async def get_regulatory_info(
         pass
 
     return result
+
+
+
+@router.put("/update/regulatory/{regulatory_id}/")
+async def update_regulatory(
+    regulatory_id: str,
+    payload: RegulatorySchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    try:
+        client_encryption = getattr(request.app, "client_encryption", None)
+        if client_encryption is None:
+            client_encryption = init_encryption()
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+
+        def enc_json_or_none(obj):
+            return (
+                encrypt_value(
+                    client_encryption,
+                    dek_id,
+                    json.dumps(obj.model_dump(mode="json"))
+                ) if obj is not None else None
+            )
+
+        def enc_list(objs):
+            return encrypt_value(
+                client_encryption,
+                dek_id,
+                json.dumps([o.model_dump(mode="json") for o in objs])
+            )
+
+        reg_doc = await RegulatoryInfoDoc.get(regulatory_id)
+        if not reg_doc:
+            raise HTTPException(status_code=404, detail="Regulatory info not found")
+
+        reg_doc.state_license = enc_json_or_none(payload.state_license)
+        reg_doc.federal_certification = enc_json_or_none(payload.federal_certification)
+        reg_doc.accreditations = enc_list(payload.accreditations) if payload.accreditations is not None else None
+        reg_doc.onc_certification = enc_json_or_none(payload.onc_certification)
+        reg_doc.state_reporting_identifier = enc_list(payload.state_reporting_identifier) if payload.state_reporting_identifier is not None else None
+        reg_doc.updated_at = datetime.now(timezone.utc)
+
+        await reg_doc.save()
+
+        user = await UserDoc.get(current_user_id)
+
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(user.id),
+                action="Update",
+                resource="Regulatory",
+                resource_id=str(reg_doc.id),
+                status="success",
+                notes="Regulatory info updated successfully",
+            )
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "regulatory_id": str(reg_doc.id),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="Regulatory",
+                resource_id=regulatory_id,
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass

@@ -176,3 +176,64 @@ async def get_quality_reporting(
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.put("/update/quality-reporting/{report_id}/")
+async def update_quality_reporting(
+    report_id: str,
+    payload: QualityReportingSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    try:
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+
+        quality_report = await QualityReportingDoc.get(report_id)
+        if not quality_report:
+            raise HTTPException(status_code=404, detail="Quality Reporting record not found")
+
+        if payload.organization_name is not None:
+            quality_report.organization_name = encrypt_value(ce, dek_id, payload.organization_name)
+        if payload.reporting_cadence is not None:
+            quality_report.reporting_cadence = encrypt_value(ce, dek_id, payload.reporting_cadence)
+
+        quality_report.updated_at =  datetime.now(timezone.utc)
+        await quality_report.save()
+
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Update",
+            resource="Quality Reporting",
+            resource_id=str(quality_report.id),
+            status="success",
+            notes="Quality reporting updated",
+        )
+
+        return {"status":"success","id": str(quality_report.id)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="Quality Reporting",
+                resource_id=report_id,
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e)) 

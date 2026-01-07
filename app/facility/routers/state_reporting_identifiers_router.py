@@ -171,3 +171,77 @@ async def get_state_reporting_identifiers(
         pass
 
     return result
+
+
+@router.put("/update/state-reporting-identifiers/{identifier_id}/")
+async def update_state_reporting_identifier(
+    identifier_id: str,
+    payload: StateReportingIdentifiersSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    try:
+        client_encryption = getattr(request.app, "client_encryption", None)
+        if client_encryption is None:
+            client_encryption = init_encryption()
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        def enc_json_or_none(val):
+            return (
+                encrypt_value(
+                    client_encryption,
+                    dek_id,
+                    json.dumps(val)
+                ) if val is not None else None
+            )
+
+        doc = await StateReportingIdentifiersDocs.get(identifier_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="State Reporting Identifier not found")
+
+        doc.registry_system_name = enc_json_or_none(payload.registry_system_name)
+        doc.identifier_value = enc_json_or_none(payload.identifier_value)
+        doc.updated_at = datetime.now(timezone.utc)
+
+        await doc.save()
+
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(user.id),
+                action="Update",
+                resource="StateReportingIdentifiers",
+                resource_id=str(doc.id),
+                status="success",
+                notes="State reporting identifier updated successfully",
+            )
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "state_reporting_identifier_id": str(doc.id),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="StateReportingIdentifiers",
+                resource_id=identifier_id,
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Internal Server Error while updating state reporting identifier")  

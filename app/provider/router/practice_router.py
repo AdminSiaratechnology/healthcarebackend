@@ -228,3 +228,270 @@ async def get_practice_by_provider(
             notes=str(e),
         )
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+# @router.put("/practice/{practice_id}")
+# async def update_practice(
+#     practice_id: str,
+#     payload: PracticeSchema,
+#     request: Request,
+#     current_user_id: str = Depends(get_current_user_id),
+# ):
+#     try:
+#         client_encryption = getattr(request.app, "client_encryption", None)
+#         if client_encryption is None:
+#             client_encryption = init_encryption()
+#         dek_id = getattr(request.app, "dek_id", None)   
+#         if dek_id is None:
+#             dek_id = ensure_data_key()
+        
+#         def enc_json_or_none(obj):
+#             if obj is None:
+#                 return None
+            
+#             if hasattr(obj, "model_dump"):
+#                 data = obj.model_dump(mode="json")
+#             elif hasattr(obj, "value"):
+#                 data = obj.value
+#             else:
+#                 data = obj
+                
+#             return encrypt_value(
+#                 client_encryption,
+#                 dek_id,
+#                 json.dumps(data)
+#             )
+#         user = await UserDoc.get(current_user_id)
+#         if not user:
+#             raise HTTPException(status_code=404, detail="User not found")
+#         practice_doc = await Practice.get(practice_id)
+#         if not practice_doc:
+#             raise HTTPException(status_code=404, detail="Practice not found")
+#         practice_doc.assigned_practice = enc_json_or_none(payload.assigned_practice)
+#         practice_doc.rotation_days = enc_json_or_none(payload.rotation_days)
+#         practice_doc.on_calls_days = enc_json_or_none(payload.on_call_days)
+#         practice_doc.default_visit_type = enc_json_or_none(payload.visit_type)
+#         practice_doc.billing_location_code = enc_json_or_none(payload.billing_location_code)
+
+#         if payload.provider_id:
+#             try:
+#                 prov_oid = PydanticObjectId(payload.provider_id)
+#             except Exception:
+#                  raise HTTPException(status_code=400, detail="Invalid provider_id format")
+            
+#             provider = await Provider.get(prov_oid)
+#             if not provider:
+#                 raise HTTPException(status_code=404, detail="Provider not found")
+#             practice_doc.provider_id = provider
+
+#         if payload.facility_ids is not None:
+#             facilities = []
+#             for fid in payload.facility_ids:
+#                 try:
+#                     foid = PydanticObjectId(fid)
+#                 except Exception:
+#                      raise HTTPException(status_code=400, detail=f"Invalid facility_id format: {fid}")
+                
+#                 fac = await Facility.get(foid)
+#                 if not fac:
+#                     raise HTTPException(status_code=404, detail=f"Facility {fid} not found")
+#                 facilities.append(fac)
+#             practice_doc.facility_ids = facilities
+
+#         if payload.primary_facility_id:
+#             try:
+#                 pfoid = PydanticObjectId(payload.primary_facility_id)
+#             except Exception:
+#                 raise HTTPException(status_code=400, detail="Invalid primary_facility_id format")
+            
+#             p_fac = await Facility.get(pfoid)
+#             if not p_fac:
+#                 raise HTTPException(status_code=404, detail="Primary Facility not found")
+#             practice_doc.primary_facility_id = p_fac
+
+#         practice_doc.updated_at = datetime.now(timezone.utc)
+#         await practice_doc.save()
+#         try:
+#             await log_audit(
+#                 request=request,
+#                 user_id=str(user.id),
+#                 action="Update",
+#                 resource="Practice",
+#                 resource_id=str(practice_doc.id),
+#                 status="success",
+#                 notes="Practice updated successfully",
+#             )
+#         except Exception:
+#             pass
+#         return {"success": True, "id": str(practice_doc.id)}
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         await log_audit(
+#             request=request,
+#             user_id=current_user_id,
+#             action="Update",
+#             resource="Practice",
+#             resource_id=practice_id,
+#             status="failed",
+#             notes=str(e),
+#         )
+#         raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
+
+
+@router.put("/practice/{practice_id}")
+async def update_practice(
+    practice_id: str,
+    payload: PracticeSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    try:
+        # ---------- Encryption setup ----------
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+            request.app.dek_id = dek_id
+
+        # ---------- Helper: same as POST behavior ----------
+        def encrypt_field(value):
+            if value is None:
+                return None
+
+            # Enum → direct value
+            if hasattr(value, "value"):
+                return encrypt_value(ce, dek_id, value.value)
+
+            # Pydantic model → dict → json
+            if hasattr(value, "model_dump"):
+                return encrypt_value(
+                    ce,
+                    dek_id,
+                    json.dumps(value.model_dump(mode="json"))
+                )
+
+            # Dict → json
+            if isinstance(value, dict):
+                return encrypt_value(
+                    ce,
+                    dek_id,
+                    json.dumps(value)
+                )
+
+            # Plain string / fallback
+            return encrypt_value(ce, dek_id, str(value))
+
+        # ---------- User validation ----------
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # ---------- Practice validation ----------
+        practice_doc = await Practice.get(practice_id)
+        if not practice_doc:
+            raise HTTPException(status_code=404, detail="Practice not found")
+
+        # ---------- Update encrypted fields ----------
+        practice_doc.assigned_practice = encrypt_field(payload.assigned_practice)
+        practice_doc.rotation_days = encrypt_field(payload.rotation_days)
+        practice_doc.on_calls_days = encrypt_field(payload.on_call_days)
+        practice_doc.default_visit_type = encrypt_field(payload.visit_type)
+        practice_doc.billing_location_code = encrypt_field(payload.billing_location_code)
+
+        # ---------- Provider update ----------
+        if payload.provider_id:
+            try:
+                prov_oid = PydanticObjectId(payload.provider_id)
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid provider_id")
+
+            provider = await Provider.get(prov_oid)
+            if not provider:
+                raise HTTPException(status_code=404, detail="Provider not found")
+
+            practice_doc.provider_id = provider
+
+        # ---------- Facilities update ----------
+        if payload.facility_ids is not None:
+            facilities = []
+            for fid in payload.facility_ids:
+                try:
+                    foid = PydanticObjectId(fid)
+                except Exception:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid facility_id: {fid}"
+                    )
+
+                fac = await Facility.get(foid)
+                if not fac:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Facility not found: {fid}"
+                    )
+                facilities.append(fac)
+
+            practice_doc.facility_ids = facilities
+
+        # ---------- Primary facility ----------
+        if payload.primary_facility_id:
+            try:
+                pfoid = PydanticObjectId(payload.primary_facility_id)
+            except Exception:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid primary_facility_id"
+                )
+
+            primary_fac = await Facility.get(pfoid)
+            if not primary_fac:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Primary facility not found"
+                )
+
+            practice_doc.primary_facility_id = primary_fac
+
+        # ---------- Save ----------
+        practice_doc.updated_at = datetime.now(timezone.utc)
+        await practice_doc.save()
+
+        # ---------- Audit ----------
+        await log_audit(
+            request=request,
+            user_id=current_user_id,
+            action="UPDATE",
+            resource="practice",
+            resource_id=str(practice_doc.id),
+            status="success",
+            notes="Practice updated successfully",
+        )
+
+        return {
+            "success": True,
+            "id": str(practice_doc.id),
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        await log_audit(
+            request=request,
+            user_id=current_user_id,
+            action="UPDATE",
+            resource="practice",
+            resource_id=practice_id,
+            status="failed",
+            notes=str(e),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Internal Server Error"
+        )

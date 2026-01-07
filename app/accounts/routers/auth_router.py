@@ -256,42 +256,8 @@ async def login(payload: LoginRequest, request: Request):
         notes="User logged in"
     )
 
-    return TokenResponse(access_token=token, token_type="bearer")
+    return TokenResponse(access_token=token, token_type="bearer", is_google_auth_enabled=user.is_google_auth_enabled)
 
-
-# @router.post("/auth/google-auth/setup", response_model=GoogleAuthSetupResponse)
-# async def setup_google_auth(payload: GoogleAuthSetupRequest, request: Request):
-#     user = await _authenticate_user(payload.email, payload.password, request)
-#     client_encryption = request.app.client_encryption
-#     dek_id = request.app.dek_id
-
-#     previously_enabled = user.is_google_auth_enabled
-#     secret = pyotp.random_base32()
-#     totp = pyotp.TOTP(secret)
-#     issuer = "Healthcare Management System"
-#     provisioning_uri = totp.provisioning_uri(name=payload.email, issuer_name=issuer)
-#     qr_image = _build_qr_code_image(provisioning_uri)
-
-#     user.google_auth_secret = encrypt_value(client_encryption, dek_id, secret)
-    
-#     user.is_google_auth_enabled = False
-#     user.google_auth_verified_at = None
-#     await user.save()
-
-#     await log_audit(
-#         request=request,
-#         action="GOOGLE_AUTH_SETUP",
-#         resource="auth",
-#         resource_id=str(user.id),
-#         status="success",
-#         notes="Generated Google Authenticator secret"
-#     )
-
-#     return GoogleAuthSetupResponse(
-#         secret=secret,
-#         qr_code_png=qr_image,
-#         is_already_enabled=previously_enabled
-#     )
 
 
 @router.post("/auth/google-auth/setup", response_model=GoogleAuthSetupResponse)
@@ -311,7 +277,7 @@ async def setup_google_auth(payload: GoogleAuthSetupRequest, request: Request):
     # Yaha sirf tab aayega jab enabled == False ho
     secret = pyotp.random_base32()
     totp = pyotp.TOTP(secret)
-    issuer = "Healthcare Management System"
+    issuer = "Healthcare"
     provisioning_uri = totp.provisioning_uri(name=payload.email, issuer_name=issuer)
 
     qr_image = _build_qr_code_image(provisioning_uri)
@@ -328,45 +294,88 @@ async def setup_google_auth(payload: GoogleAuthSetupRequest, request: Request):
     )
 
 
+# @router.post("/auth/google-auth/verify", response_model=TokenResponse)
+# async def verify_google_auth(payload: GoogleAuthVerifyRequest, request: Request):
+#     try:
+#         user, email_value = await _get_user_from_authorization(request)
+#     except HTTPException as e:
+#         if e.status_code == 401:
+#             user, email_value = await _find_user_by_google_otp(payload.otp, request)
+#         else:
+#             raise
+
+#     if not user.is_active:
+#         raise HTTPException(status_code=403, detail="User inactive")
+#     client_encryption = request.app.client_encryption
+
+#     secret = _decrypt_to_str(client_encryption, user.google_auth_secret)
+#     if not secret:
+#         raise HTTPException(status_code=400, detail="Google Authenticator not configured")
+
+#     totp = pyotp.TOTP(secret)
+#     if not totp.verify(payload.otp, valid_window=1):
+#         raise HTTPException(status_code=401, detail="Invalid OTP")
+
+#     user.is_google_auth_enabled = True
+#     user.google_auth_verified_at = datetime.now(timezone.utc)
+#     await user.save()
+
+#     token = _generate_token_for_user(user, email_value, request)
+
+#     await log_audit(
+#         request=request,
+#         user_id=str(user.id),
+#         action="GOOGLE_AUTH_VERIFY",
+#         resource="auth",
+#         resource_id=str(user.id),
+#         status="success",
+#         notes="Google Authenticator verified and login granted"
+#     )
+
+#     return TokenResponse(access_token=token, token_type="bearer")
+
 @router.post("/auth/google-auth/verify", response_model=TokenResponse)
-async def verify_google_auth(payload: GoogleAuthVerifyRequest, request: Request):
-    try:
-        user, email_value = await _get_user_from_authorization(request)
-    except HTTPException as e:
-        if e.status_code == 401:
-            user, email_value = await _find_user_by_google_otp(payload.otp, request)
-        else:
-            raise
+async def verify_google_auth(
+    payload: GoogleAuthVerifyRequest,
+    request: Request
+):
+    # ✅ OTP se user dhundhna band
+    user, email_value = await _get_user_from_authorization(request)
 
     if not user.is_active:
         raise HTTPException(status_code=403, detail="User inactive")
-    client_encryption = request.app.client_encryption
 
-    secret = _decrypt_to_str(client_encryption, user.google_auth_secret)
+    secret = _decrypt_to_str(
+        request.app.client_encryption,
+        user.google_auth_secret
+    )
+
     if not secret:
-        raise HTTPException(status_code=400, detail="Google Authenticator not configured")
+        raise HTTPException(
+            status_code=400,
+            detail="Google Authenticator not configured"
+        )
 
     totp = pyotp.TOTP(secret)
+
     if not totp.verify(payload.otp, valid_window=1):
         raise HTTPException(status_code=401, detail="Invalid OTP")
 
+    # ✅ OTP correct → final login
     user.is_google_auth_enabled = True
     user.google_auth_verified_at = datetime.now(timezone.utc)
     await user.save()
 
-    token = _generate_token_for_user(user, email_value, request)
-
-    await log_audit(
-        request=request,
-        user_id=str(user.id),
-        action="GOOGLE_AUTH_VERIFY",
-        resource="auth",
-        resource_id=str(user.id),
-        status="success",
-        notes="Google Authenticator verified and login granted"
+    access_token = _generate_token_for_user(
+        user,
+        email_value,
+        request
     )
 
-    return TokenResponse(access_token=token, token_type="bearer")
+    return TokenResponse(
+        access_token=access_token,
+        token_type="bearer"
+    )
 
 
 @router.post("/auth/logout")

@@ -233,7 +233,7 @@ async def get_patient(
                     usr_id = None
 
         personal_payload = _decrypt_json_field(ce, doc.personal_information)
-        print("sooooooooooooooooooooooooooooooo",personal_payload)
+       
         personal_info = (personal_payload or {}).get("personal") or {}
         contact_info = (personal_payload or {}).get("contact") or {}
 
@@ -258,7 +258,7 @@ async def get_patient(
 
         try:
             pi_model = PersonalInfo.model_validate(personal_info)
-            print("gggggggggggggggggggggggggggg",pi_model)
+           
         except ValidationError:
             _d = {
                 "first_name": personal_info.get("first_name"),
@@ -784,3 +784,86 @@ async def list_patients(
             pass
         raise HTTPException(status_code=500, detail=str(e))
     
+
+
+@router.put("/update/{patient_id}/")
+async def update_patient(
+    patient_id: str,
+    schema: PatientSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    try:
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+            request.app.dek_id = dek_id
+
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        try:
+            p_oid = PydanticObjectId(patient_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid Patient ID format")
+        doc = await PatientDoc.get(p_oid)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Patient not found")
+
+        raw_body = {}
+        try:
+            raw_body = await request.json()
+        except Exception:
+            raw_body = {}
+        personal_data = schema.personal_information.model_dump(mode="json", serialize_as_any=True) if schema.personal_information else {}
+        if not personal_data:
+            pi_alt = raw_body.get("personal") or raw_body.get("personal_information") or {}
+            if isinstance(pi_alt, dict):
+                personal_data = pi_alt
+        
+        contact_input = schema.contact_information.model_dump(mode="json", serialize_as_any=True) if schema.contact_information else {}
+        if not contact_input:
+            ci_alt = raw_body.get("contact") or raw_body.get("contact_information") or {}
+            if isinstance(ci_alt, dict):
+                contact_input = ci_alt
+
+        payload = {
+            "personal": personal_data,
+            "contact": contact_input,
+        }
+        
+        enc_info = encrypt_value(ce, dek_id, json.dumps(payload))
+        doc.personal_information = enc_info
+        doc.updated_at = datetime.now(timezone.utc)
+
+        await doc.save()
+
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Update",
+            resource="Patient",
+            resource_id=str(doc.id),
+            status="success",
+            notes="Patient updated",
+        )
+
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        await log_audit(
+            request=request,
+            user_id=current_user_id,
+            action="Update",
+            resource="Patient",
+            resource_id=patient_id,
+            status="failed",
+            notes=str(e),
+        )
+        raise HTTPException(status_code=500, detail=str(e))

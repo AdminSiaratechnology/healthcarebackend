@@ -180,3 +180,77 @@ async def get_patient_medical(
             notes=str(e),
         )
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.put("/medical/update/{medical_id}/")
+async def update_patient_medical(
+    medical_id: str,
+    payload: PatientMedicalSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    try:
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+            request.app.dek_id = dek_id
+
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        try:
+            m_oid = PydanticObjectId(medical_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid Medical ID format")
+        insurance = await PatientMedicalDoc.get(m_oid)
+        if not insurance:
+            raise HTTPException(status_code=404, detail="Patient Medical not found")
+
+        diag_json = (
+            json.dumps(payload.diagonisis_information.model_dump(mode="json", serialize_as_any=True))
+            if getattr(payload, "diagonisis_information", None) else None
+        )
+        allergies_val = getattr(payload, "allergies", None)
+        allergies_json = (
+            json.dumps(allergies_val.model_dump(mode="json", serialize_as_any=True))
+            if allergies_val else None
+        )
+
+        if diag_json is not None:
+            insurance.diagonisis_information = encrypt_value(ce, dek_id, diag_json)
+        if allergies_json is not None:
+            insurance.allergies = encrypt_value(ce, dek_id, allergies_json)
+
+        insurance.updated_at = datetime.now(timezone.utc)
+        await insurance.save()
+
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Update",
+            resource="Patient Medical",
+            resource_id=str(insurance.id),
+            status="success",
+            notes="Patient medical updated",
+        )
+
+        return {"id": str(insurance.id)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        await log_audit(
+            request=request,
+            user_id=current_user_id,
+            action="Update",
+            resource="Patient Medical",
+            resource_id=medical_id,
+            status="failed",
+            notes=str(e),
+        )
+        raise HTTPException(status_code=500, detail=str(e))

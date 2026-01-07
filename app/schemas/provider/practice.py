@@ -42,11 +42,15 @@ class OncallDays(BaseModel):
     saturday : bool = False
 
 
+
 class PracticeSchema(BaseModel):
     assigned_practice : Optional[AssignedPractice] = None
     rotation_days : Optional[RotationDays] = None
     on_call_days : Optional[OncallDays] = None
     visit_type : Optional[VisitType] = None
     billing_location_code : Optional[BillingLocationCode] = None
+    provider_id: Optional[str] = None
+    facility_ids: Optional[list[str]] = None
+    primary_facility_id: Optional[str] = None
 
 

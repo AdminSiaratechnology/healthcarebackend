@@ -186,3 +186,70 @@ async def get_quality_settings(
         pass
 
     return result
+
+
+
+@router.put("/update/quality/{quality_id}/")
+async def update_quality(
+    quality_id: str,
+    payload: QualitySchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    try:
+        client_encryption = getattr(request.app, "client_encryption", None)
+        if client_encryption is None:
+            client_encryption = init_encryption()
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+
+        def enc_or_none(val):
+            return encrypt_value(client_encryption, dek_id, val) if val is not None else None
+
+        quality_doc = await QualityDoc.get(quality_id)
+        if not quality_doc:
+            raise HTTPException(status_code=404, detail="Quality record not found")
+
+        quality_doc.enable_mds_reporting = enc_or_none(payload.enable_mds_reporting)
+        quality_doc.enable_quality_measure = enc_or_none(payload.enable_quality_measure)
+        quality_doc.enable_infection_control_tracking = enc_or_none(payload.enable_infection_control_tracking)
+        quality_doc.fall_risk_program = enc_or_none(payload.fall_risk_program)
+        quality_doc.updated_at = datetime.now(timezone.utc)
+
+        await quality_doc.save()
+
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="Quality",
+                resource_id=str(quality_doc.id),
+                status="success",
+                notes="Quality settings updated successfully",
+            )
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "quality_id": str(quality_doc.id),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="Quality",
+                resource_id=quality_id,
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Internal Server Error while updating quality settings")    

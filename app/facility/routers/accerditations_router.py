@@ -182,3 +182,81 @@ async def get_accreditations(
         pass
 
     return result
+
+
+
+@router.put("/update/accreditations/{accreditation_id}/")
+async def update_accreditations(
+    accreditation_id: str,
+    acc: AccreditationsSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    try:
+        client_encryption = getattr(request.app, "client_encryption", None)
+        if client_encryption is None:
+            client_encryption = init_encryption()
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+
+        acc_body = acc.accreditations.value if acc.accreditations is not None else None
+        status_val = acc.status.value if acc.status is not None else None
+        expiry_val = acc.expiry_date.isoformat() if acc.expiry_date is not None else None
+        cert_id = acc.certificate_file_id if acc.certificate_file_id is not None else None
+
+        def enc_json_or_none(val):
+            return (
+                encrypt_value(
+                    client_encryption,
+                    dek_id,
+                    json.dumps(val)
+                ) if val is not None else None
+            )
+
+        doc = await AccerditationsDoc.get(accreditation_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Accreditations record not found")
+
+        doc.accreditations = enc_json_or_none(acc_body)
+        doc.status = enc_json_or_none(status_val)
+        doc.expiry_date = enc_json_or_none(expiry_val)
+        doc.certificate_file_id = enc_json_or_none(cert_id)
+        doc.updated_at = datetime.now(timezone.utc)
+
+        await doc.save()
+
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="Accreditations",
+                resource_id=str(doc.id),
+                status="success",
+                notes="Accreditations updated successfully",
+            )
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "accreditations_id": str(doc.id),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="Accreditations",
+                resource_id=accreditation_id,
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Internal Server Error while updating accreditations")

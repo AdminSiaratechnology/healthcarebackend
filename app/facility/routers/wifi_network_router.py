@@ -170,3 +170,69 @@ async def get_wifi_networks(
         pass
 
     return result
+
+
+
+@router.put("/update/wifi-network/{network_id}/")
+async def update_wifi_network(
+    network_id: str,
+    payload: WifiNetworkSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    try:
+        client_encryption = getattr(request.app, "client_encryption", None)
+        if client_encryption is None:
+            client_encryption = init_encryption()
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+
+        def enc_or_none(val):
+            return encrypt_value(client_encryption, dek_id, val) if val is not None else None
+
+        wifi_doc = await WifiNetwork.get(PydanticObjectId(network_id))
+        if not wifi_doc:
+            raise HTTPException(status_code=404, detail="Wifi Network not found")
+
+        wifi_doc.ssid = enc_or_none(payload.ssid)
+        wifi_doc.password = enc_or_none(payload.password)
+        wifi_doc.guest_network = enc_or_none(payload.guest_network)
+        wifi_doc.updated_at = datetime.now(timezone.utc)
+
+        await wifi_doc.save()
+
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="Wifi Network",
+                resource_id=str(wifi_doc.id),
+                status="success",
+                notes="Wifi network updated successfully",
+            )
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "wifi_network_id": str(wifi_doc.id),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="Wifi Network",
+                resource_id="N/A",
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Internal Server Error while updating wifi network")

@@ -183,3 +183,68 @@ async def get_breach_contacts(
         except Exception:
             pass
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.put("/breach-contact/update/{contact_id}/")
+async def update_breach_contact(
+    contact_id: str,
+    payload: BreachContactsSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    try:
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+            request.app.dek_id = dek_id
+
+        contact_obj = await BrachResponseContactDocs.get(contact_id)
+        if not contact_obj:
+            raise HTTPException(status_code=404, detail="Breach Contact not found")
+
+        if payload.name is not None:
+            contact_obj.name = encrypt_value(ce, dek_id, payload.name)
+        if payload.Role is not None:
+            contact_obj.Role = encrypt_value(ce, dek_id, payload.Role)
+        if payload.phone is not None:
+            contact_obj.phone = encrypt_value(ce, dek_id, payload.phone)
+        if payload.email is not None:
+            contact_obj.email = encrypt_value(ce, dek_id, payload.email)
+
+        contact_obj.updated_at = datetime.now(timezone.utc)
+
+        await contact_obj.save()
+
+        await log_audit(
+            request=request,
+            user_id=current_user_id,
+            action="Update",
+            resource="Breach Contact",
+            resource_id=str(contact_obj.id),
+            status="success",
+            notes="Breach contact updated",
+        )
+
+        return {"status":"success","id": str(contact_obj.id)}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await log_audit(
+                request=request,
+                user_id=current_user_id,
+                action="Update",
+                resource="Breach Contact",
+                resource_id=contact_id,
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e)) 

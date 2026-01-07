@@ -57,6 +57,7 @@ async def create_imaging_center(
             phone=enc_or_none(center.phone),
             fax=enc_or_none(center.fax),
             turnaround_time=enc_or_none(center.turnaround_time),
+            transport_notes=enc_or_none(center.transport_notes),
             created_by=user,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -175,3 +176,74 @@ async def get_imaging_centers(
         pass
 
     return result
+
+
+@router.put("/update/imaging-center/{center_id}/")
+async def update_imaging_center(
+    center_id: str,
+    payload: ImagingCenterSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    try:
+        client_encryption = getattr(request.app, "client_encryption", None)
+        if client_encryption is None:
+            client_encryption = init_encryption()
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+
+        def enc_or_none(val):
+            return encrypt_value(client_encryption, dek_id, val) if val is not None else None
+
+        center_doc = await ImagingCenter.get(PydanticObjectId(center_id))
+        if not center_doc:
+            raise HTTPException(status_code=404, detail="Imaging Center not found")
+
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        center_doc.center_name = enc_or_none(payload.center_name)
+        center_doc.phone = enc_or_none(payload.phone)
+        center_doc.fax = enc_or_none(payload.fax)
+        center_doc.turnaround_time = enc_or_none(payload.turnaround_time)
+        center_doc.transport_notes = enc_or_none(payload.transport_notes)
+        center_doc.updated_at = datetime.now(timezone.utc)
+
+        await center_doc.save()
+
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(user.id),
+                action="Update",
+                resource="Imaging Center",
+                resource_id=str(center_doc.id),
+                status="success",
+                notes="Imaging center updated successfully",
+            )
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "imaging_center_id": str(center_doc.id),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="Imaging Center",
+                resource_id=center_id,
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Internal Server Error while updating imaging center")

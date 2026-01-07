@@ -171,3 +171,85 @@ async def get_security(
             notes=str(e),
         )
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.put("/security/{security_id}")
+async def update_security(
+    security_id: str,
+    payload: SecurityCreateRequest,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    try:
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+            request.app.dek_id = dek_id
+
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        try:
+            sec_oid = PydanticObjectId(security_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid security_id")
+        doc = await Security.get(sec_oid)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Security not found")
+
+        try:
+            prov_oid = PydanticObjectId(payload.provider_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid provider_id")
+        provider = await Provider.get(prov_oid)
+        if not provider:
+            raise HTTPException(status_code=404, detail="Provider not found")
+
+        role_val = None
+        if user.role is not None:
+            try:
+                r = decrypt_value(ce, user.role)
+                role_val = r.decode("utf-8") if isinstance(r, (bytes, bytearray)) else r
+            except Exception:
+                role_val = None
+        is_admin = role_val in {"admin", "super_admin"}
+        if not is_admin and provider.user_id != str(user.id):
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+        sec = payload.security
+        if sec.is_account_active is not None:
+            doc.is_account_active = encrypt_value(ce, dek_id, sec.is_account_active)
+        if getattr(sec, "is_sms_authentication", None) is not None:
+            doc.is_sms_authentication = encrypt_value(ce, dek_id, sec.is_sms_authentication)
+
+        await doc.save()
+
+        await log_audit(
+            request=request,
+            user_id=current_user_id,
+            action="UPDATE",
+            resource="security",
+            resource_id=str(doc.id),
+            status="success",
+            notes="Security updated",
+        ) 
+        return {"id": str(doc.id)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        await log_audit(
+            request=request,
+            user_id=current_user_id,
+            action="UPDATE",
+            resource="security",
+            resource_id=security_id,
+            status="failed",
+            notes=str(e),
+        )
+        raise HTTPException(status_code=500, detail=str(e))

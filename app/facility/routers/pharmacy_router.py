@@ -167,3 +167,70 @@ async def get_pharmacies(
         pass
 
     return result
+
+
+@router.put("/update/pharmacy/{pharmacy_id}/")
+async def update_pharmacy(
+    pharmacy_id: str,
+    payload: PharmaciesSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+): 
+    try:
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+            request.app.dek_id = dek_id
+        pharmacy_obj = None
+        try:
+            pharmacy_obj_id = PydanticObjectId(pharmacy_id)
+            pharmacy_obj = await Pharmacies.get(pharmacy_obj_id)
+        except Exception:
+            pass
+        if pharmacy_obj is None:
+            pharmacy_obj = await Pharmacies.get(pharmacy_id)
+        if not pharmacy_obj:
+            raise HTTPException(status_code=404, detail="Pharmacy not found")
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")  
+        def enc_or_none(val):
+            return encrypt_value(ce, dek_id, val) if val is not None else None
+        if payload.pharmacy_name is not None:
+            pharmacy_obj.pharmacy_name = enc_or_none(payload.pharmacy_name)
+        if payload.phone is not None:
+            pharmacy_obj.phone = enc_or_none(payload.phone)
+        if payload.address is not None:
+            pharmacy_obj.address = enc_or_none(payload.address)
+        if payload.fax is not None:
+            pharmacy_obj.fax = enc_or_none(payload.fax)
+        if payload.after_hours_phone is not None:
+            pharmacy_obj.after_hours_phone = enc_or_none(payload.after_hours_phone)
+        if payload.contract_file_id is not None:
+            pharmacy_obj.contract_file_id = enc_or_none(payload.contract_file_id)
+        if payload.delivery_schedule is not None:
+            pharmacy_obj.delivery_schedule = enc_or_none(payload.delivery_schedule)
+        pharmacy_obj.updated_at = datetime.now(timezone.utc)
+        await pharmacy_obj.save()
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Update",
+            resource="Pharmacy",
+            resource_id=str(pharmacy_obj.id),
+            status="success",
+            notes="Pharmacy updated successfully",
+        )
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Internal Server Error while updating pharmacy"
+        )
+    

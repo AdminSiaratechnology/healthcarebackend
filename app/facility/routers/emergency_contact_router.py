@@ -105,87 +105,6 @@ async def create_emergency_contact(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# @router.get("/emergency-contact/get/{facility_id}/")
-# async def get_emergency_contacts(
-#     facility_id: str,
-#     request: Request,
-#     current_user_id: str = Depends(get_current_user_id),
-# ):
-#     try:
-#         ce = getattr(request.app, "client_encryption", None)
-#         if ce is None:
-#             ce = init_encryption()
-#             request.app.client_encryption = ce
-
-#         user = await UserDoc.get(current_user_id)
-#         if not user:
-#             raise HTTPException(status_code=404, detail="User not found")
-
-#         facility_obj = None
-#         try:
-#             facility_obj_id = PydanticObjectId(facility_id)
-#             facility_obj = await Facility.get(facility_obj_id)
-#         except Exception:
-#             pass
-#         if facility_obj is None:
-#             facility_obj = await Facility.get(facility_id)
-#         if not facility_obj:
-#             raise HTTPException(status_code=404, detail="Facility not found")
-
-#         by_link = await EmergencyContactDocs.find(EmergencyContactDocs.facility_id.id == facility_obj.id).to_list()
-#         by_str = await EmergencyContactDocs.find(EmergencyContactDocs.facility_id == str(facility_obj.id)).to_list()
-
-#         seen = set()
-#         docs = []
-#         for d in by_link + by_str:
-#             if str(d.id) in seen:
-#                 continue
-#             seen.add(str(d.id))
-#             docs.append(d)
-
-#         result = [
-#             {
-#                 "id": str(ec.id),
-#                 "role": _decrypt_value(ce, ec.role),
-#                 "phone": _decrypt_value(ce, ec.phone),
-#                 "after_hour": _decrypt_value(ce, ec.after_hour),
-#                 "created_at": ec.created_at,
-#                 "updated_at": ec.updated_at,
-#             } for ec in docs
-#         ]
-
-#         try:
-#             await log_audit(
-#                 request=request,
-#                 user_id=str(user.id),
-#                 action="Read",
-#                 resource="Emergency Contact",
-#                 resource_id=str(facility_obj.id),
-#                 status="success",
-#                 notes="Emergency contacts fetched",
-#             )
-#         except Exception:
-#             pass
-
-#         return result
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         try:
-#             await log_audit(
-#                 request=request,
-#                 user_id=current_user_id,
-#                 action="Read",
-#                 resource="Emergency Contact",
-#                 resource_id=facility_id,
-#                 status="failed",
-#                 notes=str(e),
-#             )
-#         except Exception:
-#             pass
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
 
 @router.get("/emergency-contact/get/{facility_id}/")
 async def get_emergency_contacts(
@@ -246,3 +165,75 @@ async def get_emergency_contacts(
         pass
 
     return result
+
+
+
+@router.put("/emergency-contact/update/{contact_id}/")
+async def update_emergency_contact(
+    contact_id: str,
+    payload: emergency_contact_Schema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    try:
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+            request.app.dek_id = dek_id
+
+        contact_obj = None
+        try:
+            contact_obj_id = PydanticObjectId(contact_id)
+            contact_obj = await EmergencyContactDocs.get(contact_obj_id)
+        except Exception:
+            pass
+        if contact_obj is None:
+            contact_obj = await EmergencyContactDocs.get(contact_id)
+        if not contact_obj:
+            raise HTTPException(status_code=404, detail="Emergency Contact not found")
+
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        if payload.role is not None:
+            contact_obj.role = encrypt_value(ce, dek_id, payload.role)
+        if payload.phone is not None:
+            contact_obj.phone = encrypt_value(ce, dek_id, payload.phone)
+        if payload.after_hour is not None:
+            contact_obj.after_hour = encrypt_value(ce, dek_id, payload.after_hour)
+
+        contact_obj.updated_at = datetime.now(timezone.utc)
+        await contact_obj.save()
+
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Update",
+            resource="Emergency Contact",
+            resource_id=str(contact_obj.id),
+            status="success",
+            notes="Emergency contact updated",
+        )
+
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await log_audit(
+                request=request,
+                user_id=current_user_id,
+                action="Update",
+                resource="Emergency Contact",
+                resource_id="N/A",
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))

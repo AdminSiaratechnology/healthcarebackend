@@ -130,16 +130,14 @@ async def get_patient_insurance(
         if not patient:
             raise HTTPException(status_code=404, detail="Patient not found")
 
-        by_link = await PatientInsuranceDoc.find(PatientInsuranceDoc.patient_id.id == patient.id).to_list()
-        by_str = await PatientInsuranceDoc.find(PatientInsuranceDoc.patient_id == str(patient.id)).to_list()
+         # ---------------- Insurance (Patient + created_by) ----------------
 
-        seen = set()
-        docs = []
-        for d in by_link + by_str:
-            if str(d.id) in seen:
-                continue
-            seen.add(str(d.id))
-            docs.append(d)
+        insurance = await PatientInsuranceDoc.find(
+            PatientInsuranceDoc.patient_id.id == patient.id,
+            PatientInsuranceDoc.created_by.id == user.id
+        ).sort("created_at").to_list()
+       
+        
 
         result = [
             {
@@ -149,7 +147,7 @@ async def get_patient_insurance(
                 "primary_secondary_insurance": _decrypt_json_field(ce, ins.primary_secondary_insurance),
                 "created_at": ins.created_at,
                 "updated_at": ins.updated_at,
-            } for ins in docs
+            } for ins in insurance
         ]
 
         await log_audit(
@@ -172,6 +170,77 @@ async def get_patient_insurance(
             action="Read",
             resource="Patient Insurance",
             resource_id=patient_id,
+            status="failed",
+            notes=str(e),
+        )
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
+
+@router.put("/insurance/update/{insurance_id}/")
+async def update_patient_insurance(
+    insurance_id: str,
+    payload: InsuranceSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    try:
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+            request.app.dek_id = dek_id
+
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        try:
+            ins_oid = PydanticObjectId(insurance_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid Insurance ID format")
+        insurance = await PatientInsuranceDoc.get(ins_oid)
+        if not insurance:
+            raise HTTPException(status_code=404, detail="Patient Insurance not found")
+
+        med_info_json = json.dumps(payload.medicare_information.model_dump()) if payload.medicare_information else None
+        med_adv_json = json.dumps(payload.medicare_advantage.model_dump()) if payload.medicare_advantage else None
+        primary_sec_json = json.dumps(payload.primary_secondary_insurance.model_dump()) if payload.primary_secondary_insurance else None
+
+        if med_info_json is not None:
+            insurance.medicare_information = encrypt_value(ce, dek_id, med_info_json)
+        if med_adv_json is not None:
+            insurance.medicare_advantage = encrypt_value(ce, dek_id, med_adv_json)
+        if primary_sec_json is not None:
+            insurance.primary_secondary_insurance = encrypt_value(ce, dek_id, primary_sec_json)
+
+
+        insurance.updated_at = datetime.now(timezone.utc)
+        await insurance.save()
+
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Update",
+            resource="Patient Insurance",
+            resource_id=str(insurance.id),
+            status="success",
+            notes="Patient insurance updated",
+        )
+
+        return {"id": str(insurance.id)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        await log_audit(
+            request=request,
+            user_id=current_user_id,
+            action="Update",
+            resource="Patient Insurance",
+            resource_id=insurance_id,
             status="failed",
             notes=str(e),
         )

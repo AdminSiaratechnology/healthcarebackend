@@ -173,3 +173,70 @@ async def get_patient_addresses(
             notes=str(e),
         )
         raise HTTPException(status_code=500, detail=str(e))
+    
+
+
+@router.put("/address/update/{address_id}/")
+async def update_patient_address(
+    address_id: str,
+    payload: PatientAddressSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    try:
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+            request.app.dek_id = dek_id
+
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        try:
+            addr_oid = PydanticObjectId(address_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid Address ID format")
+        address_doc = await PatientAddressInfoDoc.get(addr_oid)
+        if not address_doc:
+            raise HTTPException(status_code=404, detail="Patient Address not found")
+
+        cur_json = json.dumps(payload.current_address.model_dump()) if payload.current_address else None
+        prev_json = json.dumps(payload.previous_address.model_dump()) if payload.previous_address else None
+
+        if cur_json is not None:
+            address_doc.current_address = encrypt_value(ce, dek_id, cur_json)
+        if prev_json is not None:
+            address_doc.previous_address = encrypt_value(ce, dek_id, prev_json)
+
+        address_doc.updated_at = datetime.now(timezone.utc)
+        await address_doc.save()
+
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Update",
+            resource="Patient Address",
+            resource_id=str(address_doc.id),
+            status="success",
+            notes="Patient address updated",
+        )
+
+        return {"id": str(address_doc.id)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        await log_audit(
+            request=request,
+            user_id=current_user_id,
+            action="Update",
+            resource="Patient Address",
+            resource_id=address_id,
+            status="failed",
+            notes=str(e),
+        )
+        raise HTTPException(status_code=500, detail=str(e)) 

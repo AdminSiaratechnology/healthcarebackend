@@ -149,25 +149,22 @@ async def get_patient_admissions(
         patient = await PatientDoc.get(p_oid)
         if not patient:
             raise HTTPException(status_code=404, detail="Patient not found")
+        
+        pat_doc = await PatientAdmissionDoc.find(
+        PatientAdmissionDoc.patient_id.id == patient.id,
+        PatientAdmissionDoc.created_by.id == user.id
+        ).to_list()
 
-        by_link = await PatientAdmissionDoc.find(PatientAdmissionDoc.patient_id.id == patient.id).to_list()
-        by_str = await PatientAdmissionDoc.find(PatientAdmissionDoc.patient_id == str(patient.id)).to_list()
-
-        seen = set()
-        docs = []
-        for d in by_link + by_str:
-            if str(d.id) in seen:
-                continue
-            seen.add(str(d.id))
-            docs.append(d)
-
+      
+       
+       
         result = []
-        for a in docs:
+        for a in pat_doc:
             result.append({
                 "id": str(a.id),
                 "admission_date": _decrypt_value(ce, a.admission_date),
-                "room_id": str(getattr(getattr(a, "room_id", None), "id", getattr(a, "room_id", ""))),
-                "bed_id": str(getattr(getattr(a, "bed_id", None), "id", getattr(a, "bed_id", ""))),
+                "room_id": str(a.room_id.ref.id),
+                "bed_id": str(a.bed_id.ref.id),
                 "admission_location": _decrypt_value(ce, a.admission_location),
                 "resident_number": _decrypt_value(ce, a.resident_number),
                 "admission_type": _decrypt_value(ce, a.admission_type),
@@ -199,6 +196,94 @@ async def get_patient_admissions(
             action="Read",
             resource="Patient Admission",
             resource_id=patient_id,
+            status="failed",
+            notes=str(e),
+        )
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.put("/admission/update/{admission_id}/")
+async def update_patient_admission(
+    admission_id: str,
+    payload: PatientAdmissionSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    try:
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+            request.app.dek_id = dek_id
+
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        try:
+            adm_oid = PydanticObjectId(admission_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid Admission ID format")
+        admission = await PatientAdmissionDoc.get(adm_oid)
+        if not admission:
+            raise HTTPException(status_code=404, detail="Patient Admission not found")
+        
+        room_oid = PydanticObjectId(payload.room_id)
+        room = await FacilityRooms.get(room_oid)
+        if not room:
+            raise HTTPException(status_code=404, detail="Room not found")
+        bed_oid = PydanticObjectId(payload.bed_id)
+        bed = await Beds.get(bed_oid)
+        if not bed:
+            raise HTTPException(status_code=404, detail="Bed not found")
+
+        # Update fields if provided
+        if payload.admission_date is not None:
+            admission.admission_date = encrypt_value(ce, dek_id, payload.admission_date.isoformat())
+        if payload.admission_location is not None:
+            admission.admission_location = encrypt_value(ce, dek_id, payload.admission_location)
+        if payload.resident_number is not None:
+            admission.resident_number = encrypt_value(ce, dek_id, payload.resident_number)
+        if payload.admission_type is not None:
+            admission.admission_type = encrypt_value(ce, dek_id, payload.admission_type.value)
+        if payload.status is not None:
+            admission.status = encrypt_value(ce, dek_id, getattr(payload.status, "value", str(payload.status)))
+        if payload.admitted_form is not None:
+            admission.admitted_form = encrypt_value(ce, dek_id, payload.admitted_form.value)
+        if payload.from_date is not None:
+            admission.from_date = encrypt_value(ce, dek_id, payload.from_date.isoformat())
+        if payload.to_date is not None:
+            admission.to_date = encrypt_value(ce, dek_id, payload.to_date.isoformat())
+        
+        admission.room_id = room
+        admission.bed_id = bed
+
+        admission.updated_at = datetime.now(timezone.utc)
+        await admission.save()
+
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Update",
+            resource="Patient Admission",
+            resource_id=str(admission.id),
+            status="success",
+            notes="Patient admission updated",
+        )
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:  
+        await log_audit(
+            request=request,
+            user_id=current_user_id,
+            action="Update",
+            resource="Patient Admission",
+            resource_id=admission_id,
             status="failed",
             notes=str(e),
         )

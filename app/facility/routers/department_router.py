@@ -198,6 +198,7 @@ async def get_facility_departments(
         raise HTTPException(status_code=404, detail="Facility not found")
 
     # ---------------- Encryption ----------------
+    
     ce = getattr(request.app, "client_encryption", None)
     if ce is None:
         ce = init_encryption()

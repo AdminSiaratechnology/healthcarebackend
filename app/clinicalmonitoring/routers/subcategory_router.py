@@ -280,3 +280,5 @@ async def update_subcategory(
         except Exception:
             pass
         raise HTTPException(status_code=500, detail="Internal Server Error while updating subcategory")
+
+

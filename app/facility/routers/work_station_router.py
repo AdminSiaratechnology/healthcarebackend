@@ -189,3 +189,80 @@ async def get_workstations(
         pass
 
     return result
+
+
+
+@router.put("/update/workstation/{workstation_id}/")
+async def update_workstation(
+    workstation_id: str,
+    payload: WorkStationSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    try:
+        client_encryption = getattr(request.app, "client_encryption", None)
+        if client_encryption is None:
+            client_encryption = init_encryption()
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+
+        def enc_or_none(val):
+            if val is None:
+                return None
+            if hasattr(val, "value"):
+                val = val.value
+            return encrypt_value(client_encryption, dek_id, val)
+
+        def enc_json_or_none(obj):
+            return (
+                encrypt_value(client_encryption, dek_id, json.dumps(obj.model_dump()))
+                if obj is not None else None
+            )
+
+        ws_doc = await WorkStation.get(workstation_id)
+        if not ws_doc:
+            raise HTTPException(status_code=404, detail="Workstation not found")
+
+        ws_doc.workstation_code = enc_or_none(payload.work_station_code)
+        ws_doc.location = enc_or_none(payload.location)
+        ws_doc.operating_system = enc_or_none(payload.os_type)
+        ws_doc.peripherals = enc_json_or_none(payload.peripherals)
+        ws_doc.updated_at = datetime.now(timezone.utc)
+
+        await ws_doc.save()
+
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="Workstation",
+                resource_id=str(ws_doc.id),
+                status="success",
+                notes="Workstation updated successfully",
+            )
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "workstation_id": str(ws_doc.id),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="Workstation",
+                resource_id="N/A",
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Internal Server Error while updating workstation")

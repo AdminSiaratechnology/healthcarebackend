@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from fastapi import APIRouter, Request, HTTPException, Depends
 from pydantic import ValidationError, BaseModel
+from app.accounts.models import provider
 from app.facility.models.facility import Facility
 from app.facility.models.facility_rooms import FacilityRooms
 from app.accounts.models.user import UserDoc
@@ -202,3 +203,72 @@ async def get_clinical(
         )
         raise HTTPException(status_code=500, detail=str(e))
 
+
+
+@router.put("/clinical/{clinical_id}")
+async def update_clinical(
+    clinical_id: str,
+    payload: ClinicalDataSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    try:
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+            request.app.dek_id = dek_id
+        def enc_json_or_none(obj):
+            if obj is None:
+                return None
+            try:
+                return encrypt_value(ce, dek_id, json.dumps(obj.model_dump(mode="json")))
+            except Exception:
+                return encrypt_value(ce, dek_id, json.dumps(obj)) if isinstance(obj, dict) else encrypt_value(ce, dek_id, str(obj))
+        def enc_list(objs):
+            return encrypt_value(ce, dek_id, json.dumps([o.model_dump(mode="json") if hasattr(o, "model_dump") else o for o in (objs or [])])) if objs is not None else None
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        clinical_doc = await clinical.get(clinical_id)
+        if not clinical_doc:
+            raise HTTPException(status_code=404, detail="Clinical not found")
+        clinical_doc.default_note_template = encrypt_value(ce, dek_id, getattr(payload.default_note_template, "value", payload.default_note_template)) if getattr(payload, "default_note_template", None) else None
+        clinical_doc.medications = enc_list(payload.medications)
+        clinical_doc.lab_tests = enc_list(payload.lab_tests)
+        clinical_doc.orders = enc_list(payload.orders)
+        clinical_doc.statement = encrypt_value(ce, dek_id, payload.statement) if getattr(payload    , "statement", None) else None
+        clinical_doc.work_flow_automation = enc_json_or_none(payload.work_flow_automation)   
+        await clinical_doc.save()
+        try:
+            await log_audit(
+                request=request,
+                user_id=current_user_id,
+                action="UPDATE",
+                resource="clinical",
+                resource_id=str(clinical_doc.id),
+                status="success",
+                notes="Clinical updated",
+            )
+        except Exception:
+            pass
+        return {"id": str(clinical_doc.id)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await log_audit(
+                request=request,
+                user_id=current_user_id,
+                action="UPDATE",
+                resource="clinical",
+                resource_id="N/A",
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))

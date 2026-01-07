@@ -185,3 +185,81 @@ async def get_workflows(
         pass
 
     return result
+
+
+
+@router.put("/update/workflow/{workflow_id}/")
+async def update_workflow(
+    workflow_id: str,
+    wf: FacilityWorkflowSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    try:
+        client_encryption = getattr(request.app, "client_encryption", None)
+        if client_encryption is None:
+            client_encryption = init_encryption()
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+
+        def enc_json_or_none(obj):
+            return (
+                encrypt_value(
+                    client_encryption,
+                    dek_id,
+                    json.dumps(obj.model_dump(mode="json"))
+                ) if obj is not None else None
+            )
+
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        workflow_doc = await WorkflowDoc.get(workflow_id)
+        if not workflow_doc:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+
+        workflow_doc.admission_workflow = enc_json_or_none(wf.adt_workflow)
+        workflow_doc.documentation_workflow = enc_json_or_none(wf.documentation_workflow)
+        workflow_doc.billing_workflow = enc_json_or_none(wf.billing_workflow)
+        workflow_doc.clinical_protocols = enc_json_or_none(wf.clinical_protocols)
+        workflow_doc.vaccine_rules = enc_json_or_none(wf.vaccine_rules)
+        workflow_doc.updated_at = datetime.now(timezone.utc)
+
+        await workflow_doc.save()
+
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(user.id),
+                action="Update",
+                resource="Workflow",
+                resource_id=str(workflow_doc.id),
+                status="success",
+                notes="Facility workflow updated successfully",
+            )
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "workflow_id": str(workflow_doc.id),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="Workflow",
+                resource_id="N/A",
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Internal Server Error while updating workflow")    

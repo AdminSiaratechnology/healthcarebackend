@@ -173,3 +173,71 @@ async def get_patient_emergency_contacts(
             notes=str(e),
         )
         raise HTTPException(status_code=500, detail=str(e))
+    
+
+
+
+@router.put("/emergency-contact/update/{contact_id}/")
+async def update_patient_emergency_contact(
+    contact_id: str,
+    payload: PatientEmergencyContact,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    try:
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+            request.app.dek_id = dek_id
+
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        try:
+            ec_oid = PydanticObjectId(contact_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid Emergency Contact ID format")
+        emergency_contact = await PatientEmergencyContactDoc.get(ec_oid)
+        if not emergency_contact:
+            raise HTTPException(status_code=404, detail="Patient Emergency Contact not found")
+
+        primary_json = json.dumps(payload.emergency_contact.model_dump()) if payload.emergency_contact else None
+        secondary_json = json.dumps(payload.secondary_contact.model_dump()) if payload.secondary_contact else None
+
+        if primary_json is not None:
+            emergency_contact.emergency_contact = encrypt_value(ce, dek_id, primary_json)
+        if secondary_json is not None:
+            emergency_contact.secondary_contact = encrypt_value(ce, dek_id, secondary_json)
+
+        emergency_contact.updated_at = datetime.now(timezone.utc)
+        await emergency_contact.save()
+
+        await log_audit(
+            request=request,
+            user_id=str(user.id),
+            action="Update",
+            resource="Patient Emergency Contact",
+            resource_id=str(emergency_contact.id),
+            status="success",
+            notes="Patient emergency contact updated",
+        )
+
+        return {"id": str(emergency_contact.id)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        await log_audit(
+            request=request,
+            user_id=current_user_id,
+            action="Update",
+            resource="Patient Emergency Contact",
+            resource_id=contact_id,
+            status="failed",
+            notes=str(e),
+        )
+        raise HTTPException(status_code=500, detail=str(e))

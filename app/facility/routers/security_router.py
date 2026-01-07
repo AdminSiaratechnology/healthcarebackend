@@ -179,3 +179,80 @@ async def get_security_settings(
         pass
 
     return result
+
+
+@router.put("/update/security/{security_id}/")
+async def update_security(
+    security_id: str,
+    sec: SecuritySchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id)
+):
+    try:
+        client_encryption = getattr(request.app, "client_encryption", None)
+        if client_encryption is None:
+            client_encryption = init_encryption()
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+
+        def enc_json_or_none(obj):
+            return (
+                encrypt_value(
+                    client_encryption,
+                    dek_id,
+                    json.dumps(obj.model_dump(mode="json"))
+                ) if obj is not None else None
+            )
+
+        security_doc = await SecurityDoc.get(PydanticObjectId(security_id))
+        if not security_doc:
+            raise HTTPException(status_code=404, detail="Security settings not found")
+
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        security_doc.user_roles_access = enc_json_or_none(sec.user_roles_access)
+        security_doc.authentication_sessions = enc_json_or_none(sec.authentication_sessions)
+        security_doc.phi_export_controls = enc_json_or_none(sec.phi_export_settings)
+        security_doc.breakglass_procedures = enc_json_or_none(sec.break_glass_audit)
+        security_doc.privacy_policies = enc_json_or_none(sec.privacy_officer_info)
+        security_doc.updated_at = datetime.now(timezone.utc)
+
+        await security_doc.save()
+
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(user.id),
+                action="Update",
+                resource="Security",
+                resource_id=str(security_doc.id),
+                status="success",
+                notes="Facility security settings updated successfully",
+            )
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "security_id": str(security_doc.id),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="Security",
+                resource_id=str(security_id),
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Internal Server Error while updating security settings")   
