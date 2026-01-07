@@ -12,9 +12,9 @@ class RegulatoryInfoDoc(Document, AutoEncryptMixin, AutoDecryptMixin):
     facility_id: Link[Facility] = Field(..., description="Reference to the associated facility")
     state_license: Binary | None = None
     federal_certification: Binary | None = None
-    accreditations: Binary | None = None  # Serialized list of accreditations
+    # accreditations: Binary | None = None  # Serialized list of accreditations
     onc_certification: Binary | None = None
-    state_reporting_identifier: Binary | None = None
+    # state_reporting_identifier: Binary | None = None
    
     created_by: Link[UserDoc] | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
