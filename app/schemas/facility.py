@@ -4,6 +4,8 @@ from enum import Enum
 
 
 
+
+
 class FacilityType(str, Enum):
     HOSPITAL = "hospital"
     CLINIC = "clinic"

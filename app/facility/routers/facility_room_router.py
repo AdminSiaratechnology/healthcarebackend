@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request, HTTPException, Depends, Form, UploadFile, File
+from fastapi import APIRouter, Request, HTTPException, Depends,Query
 from pydantic import ValidationError
 
 
@@ -26,7 +26,8 @@ async def create_facility_room(
     facility_id: str,
     room: FacilityRoom,
     request: Request,
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: str = Depends(get_current_user_id),
+    
 ):
     try:
         client_encryption = request.app.client_encryption
@@ -119,7 +120,10 @@ def _decrypt_json_field(client_encryption, encrypted_val):
 async def get_facility_rooms(
     facility_id: str,
     request: Request,
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: str = Depends(get_current_user_id),
+    page : int = Query(1, ge=1),
+    page_size : int = Query(10, ge=1),
+    search: str | None = Query(None, description="Search by room ID or wing"),
 ):
     # ---------------- User ----------------
     user = await UserDoc.get(current_user_id)
@@ -150,6 +154,15 @@ async def get_facility_rooms(
     # ---------------- Response ----------------
     result = []
     for r in rooms:
+        room_id = _decrypt_value(ce, r.room_id)
+        wing = _decrypt_value(ce, r.wing)
+        if search:
+            search_lower = search.lower()
+            if (
+                search_lower not in str(room_id or "").lower()
+                and search_lower not in str(wing or "").lower()
+            ):
+                continue
         result.append({
             "id": str(r.id),
             "room_id": _decrypt_value(ce, r.room_id),
@@ -163,6 +176,10 @@ async def get_facility_rooms(
             "updated_at": r.updated_at,
         })
 
+    total = len(result)
+    start = (page - 1) * page_size
+    end = start + page_size
+    paginated_docs = result[start:end]
     # ---------------- Audit ----------------
     try:
         await log_audit(
@@ -177,7 +194,15 @@ async def get_facility_rooms(
     except Exception:
         pass
 
-    return result
+    return {
+        "items": paginated_docs,
+        "pagination" : {
+            "page": page,
+            "page_size": page_size,
+            "total_items": total,
+            "total_pages": (total + page_size - 1) // page_size,
+        }
+    }
 
 
 

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request, HTTPException, Depends, Form, UploadFile, File
+from fastapi import APIRouter, Request, HTTPException, Depends,Query
 from pydantic import ValidationError
 
 
@@ -120,7 +120,8 @@ def _decrypt_json_field(client_encryption, encrypted_val):
 async def get_key_contacts(
     facility_id: str,
     request: Request,
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: str = Depends(get_current_user_id),
+    
 ):
     # ---------------- USER ----------------
     user = await UserDoc.get(current_user_id)

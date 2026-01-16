@@ -17,12 +17,6 @@ from app.clinicalmonitoring.models.category import CategoryDoc
 router = APIRouter(prefix="/category", tags=["Category"])
 
 
-def _dec_str(client_encryption, encrypted_val):
-    if not encrypted_val:
-        return None
-    raw = decrypt_value(client_encryption, encrypted_val)
-    return raw.decode() if isinstance(raw, (bytes, bytearray)) else raw
-
 
 @router.post("/create/category/")
 async def create_category(
@@ -46,12 +40,13 @@ async def create_category(
 
         # Check for existing category with the same name (deterministic compare)
         enc_name_det = encrypt_value_deterministic(ce, dek_id, cat.name)
+       
         existing = await CategoryDoc.find_one({"name": enc_name_det})
         
         if not existing:
             cats = await CategoryDoc.find({}).to_list()
             for c in cats:
-                if _dec_str(ce, c.name) == cat.name:
+                if decrypt_value(ce, c.name) == cat.name:
                     existing = c
                     break
             
@@ -122,7 +117,7 @@ async def list_categories(
     for c in cats:
         items.append({
             "id": str(c.id),
-            "name": _dec_str(ce, c.name),
+            "name": decrypt_value(ce, c.name),
             "created_at": c.created_at,
             "updated_at": c.updated_at,
         })
@@ -177,7 +172,7 @@ async def update_category(
         if not existing:
             cats = await CategoryDoc.find({}).to_list()
             for c in cats:
-                if c.id != doc.id and _dec_str(ce, c.name) == cat.name:
+                if c.id != doc.id and decrypt_value(ce, c.name) == cat.name:
                     existing = c
                     break
             

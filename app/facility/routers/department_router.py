@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request, HTTPException, Depends, Form, UploadFile, File
+from fastapi import APIRouter, Request, HTTPException, Depends,Query
 from pydantic import ValidationError
 
 
@@ -114,74 +114,15 @@ def _decrypt_value(client_encryption, encrypted_val):
     return decrypted_raw
 
 
-# @router.get("/get/department/{facility_id}/")
-# async def get_facility_departments(
-#     facility_id: str,
-#     request: Request,
-#     current_user_id: str = Depends(get_current_user_id)
-# ):
-#     user = await UserDoc.get(current_user_id)
-#     if not user:
-#         raise HTTPException(status_code=404, detail="User not found")
-
-#     facility_obj = None
-#     try:
-#         facility_obj_id = PydanticObjectId(facility_id)
-#         facility_obj = await Facility.get(facility_obj_id)
-#     except Exception:
-#         pass
-
-#     if facility_obj is None:
-#         facility_obj = await Facility.get(facility_id)
-#     if not facility_obj:
-#         raise HTTPException(status_code=404, detail="Facility not found")
-
-#     ce = request.app.client_encryption
-
-#     by_link = await FacilityDepartment.find(FacilityDepartment.facility_id.id == facility_obj.id).to_list()
-#     by_str = await FacilityDepartment.find(FacilityDepartment.facility_id == str(facility_obj.id)).to_list()
-
-#     seen = set()
-#     docs = []
-#     for d in by_link + by_str:
-#         if str(d.id) in seen:
-#             continue
-#         seen.add(str(d.id))
-#         docs.append(d)
-
-#     result = [
-#         {
-#             "id": str(dep.id),
-#             "code": _decrypt_value(ce, dep.code),
-#             "department_name": _decrypt_value(ce, dep.department_name),
-#             "type": _decrypt_value(ce, dep.type),
-#             "description": _decrypt_value(ce, dep.description),
-#             "created_at": dep.created_at,
-#             "updated_at": dep.updated_at,
-#         } for dep in docs
-#     ]
-
-#     try:
-#         await log_audit(
-#             request=request,
-#             user_id=str(user.id),
-#             action="Read",
-#             resource="Facility Department",
-#             resource_id=str(facility_obj.id),
-#             status="success",
-#             notes="Facility departments fetched successfully",
-#         )
-#     except Exception:
-#         pass
-
-#     return result
-
 
 @router.get("/get/department/{facility_id}/")
 async def get_facility_departments(
     facility_id: str,
     request: Request,
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: str = Depends(get_current_user_id),
+    page : int = Query(1, ge=1),
+    page_size : int = Query(10, ge=1),
+    search: str | None = Query(None, description="Search by code or department name"),
 ):
     # ---------------- User ----------------
     user = await UserDoc.get(current_user_id)
@@ -209,10 +150,20 @@ async def get_facility_departments(
         FacilityDepartment.facility_id.id == facility_obj.id,
         FacilityDepartment.created_by.id == user.id
     ).sort("created_at").to_list()
+    search_lower = search.lower() if search else None
 
     # ---------------- Response ----------------
     result = []
     for dep in departments:
+        code = _decrypt_value(ce, dep.code)
+        department_name = _decrypt_value(ce, dep.department_name)
+        if search_lower:
+            if (
+                search_lower not in str(code or "").lower()
+                and search_lower not in str(department_name or "").lower()
+            ):
+                continue    
+
         result.append({
             "id": str(dep.id),
             "code": _decrypt_value(ce, dep.code),
@@ -223,6 +174,10 @@ async def get_facility_departments(
             "updated_at": dep.updated_at,
         })
 
+    total = len(result)
+    start = (page - 1) * page_size
+    end = start + page_size
+    paginated_docs = result[start:end]
     # ---------------- Audit ----------------
     try:
         await log_audit(
@@ -237,7 +192,16 @@ async def get_facility_departments(
     except Exception:
         pass
 
-    return result
+    
+    return {
+        "items": paginated_docs,
+        "pagination" : {
+            "page": page,
+            "page_size": page_size,
+            "total_items": total,
+            "total_pages": (total + page_size - 1) // page_size,
+        }
+    }
 
 
 @router.put("/update/department/{department_id}/")

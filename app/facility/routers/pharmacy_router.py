@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request, HTTPException, Depends, Form, UploadFile, File
+from fastapi import APIRouter, Request, HTTPException, Depends, Query
 from pydantic import ValidationError
 
 
@@ -104,7 +104,10 @@ def _decrypt_value(client_encryption, encrypted_val):
 async def get_pharmacies(
     facility_id: str,
     request: Request,
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: str = Depends(get_current_user_id),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1),
+    search: str | None = Query(None, description="Search by pharmacy name or address"),
 ):
     user = await UserDoc.get(current_user_id)
     if not user:
@@ -133,12 +136,23 @@ async def get_pharmacies(
         Pharmacies.facility_id.id == facility_obj.id,
         Pharmacies.created_by.id == user.id
     ).sort("-created_at").to_list()
+    search_lower = search.lower() if search else None
 
   
 
     # ---------------- RESPONSE ----------------
-    result = [
-        {
+    result = []
+    for ph in pharmacy:
+        pharmacy_name = _decrypt_value(ce, ph.pharmacy_name)
+        address = _decrypt_value(ce, ph.address)
+        # 🔎 Search logiic
+        if search_lower:
+            if (
+                search_lower not in str(pharmacy_name or "").lower()
+                and search_lower not in str(address or "").lower()
+            ):
+                continue
+        result.append({
             "id": str(ph.id),
             "pharmacy_name": _decrypt_value(ce, ph.pharmacy_name),
             "phone": _decrypt_value(ce, ph.phone),
@@ -149,9 +163,12 @@ async def get_pharmacies(
             "delivery_schedule": _decrypt_value(ce, ph.delivery_schedule),
             "created_at": ph.created_at,
             "updated_at": ph.updated_at,
-        } for ph in pharmacy
-    ]
-
+        })
+    
+    total = len(result)
+    start = (page - 1) * page_size
+    end = start + page_size
+    paginated_docs = result[start:end]
     
     try:
         await log_audit(
@@ -166,7 +183,15 @@ async def get_pharmacies(
     except Exception:
         pass
 
-    return result
+    return {
+        "items": paginated_docs,
+        "pagination" : {
+            "page": page,
+            "page_size": page_size,
+            "total_items": total,
+            "total_pages": (total + page_size - 1) // page_size,
+        }
+    }
 
 
 @router.put("/update/pharmacy/{pharmacy_id}/")

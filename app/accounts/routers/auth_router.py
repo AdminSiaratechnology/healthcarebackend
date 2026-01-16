@@ -461,6 +461,7 @@ async def get_profile(request: Request):
         if admin_doc:
             dec_admin = admin_doc.decrypt_fields(client_encryption)
             admin_profile = dec_admin.get("profile")
+            
     elif role_val == "provider":
         provider_doc = await Provider.find_one(Provider.user_id == str(user.id))
         if provider_doc:

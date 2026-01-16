@@ -4,6 +4,7 @@ from datetime import date
 from pydantic import BaseModel, Field, EmailStr
 
 
+
 class Gender(str, Enum):
     male = "male"
     female = "female"

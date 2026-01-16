@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request, HTTPException, Depends, Form, UploadFile, File
+from fastapi import APIRouter, Request, HTTPException, Depends, Form, UploadFile, File,Query
 from pydantic import ValidationError
 
 
@@ -195,7 +195,10 @@ def _decrypt_value(client_encryption, encrypted_val):
 async def get_beds(
     facility_id: str,
     request: Request,
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: str = Depends(get_current_user_id),
+    page : int = Query(1, ge=1),
+    page_size : int = Query(10, ge=1),
+    search: str | None = Query(None, description="Search by bed ID or designation"),
 ):
     # ---------------- USER ----------------
     user = await UserDoc.get(current_user_id)
@@ -239,6 +242,15 @@ async def get_beds(
     result = []
     for bed in beds:
         room_id = None
+        bed_id = _decrypt_value(ce, bed.bed_id)
+        designation = _decrypt_value(ce, bed.designation)
+        if search:
+            search_lower = search.lower()
+            if (
+                search_lower not in str(bed_id or "").lower()
+                and search_lower not in str(designation or "").lower()
+            ):
+                continue
         if bed.room_id:
             try:
                 room = await bed.room_id.fetch()
@@ -258,6 +270,10 @@ async def get_beds(
             "created_at": bed.created_at,
             "updated_at": bed.updated_at,
         })
+    total = len(result)
+    start = (page - 1) * page_size
+    end = start + page_size
+    paginated_docs = result[start:end]
 
     # ---------------- AUDIT ----------------
     try:
@@ -273,7 +289,15 @@ async def get_beds(
     except Exception:
         pass
 
-    return result
+    return {
+        "items": paginated_docs,
+        "pagination" : {
+            "page": page,
+            "page_size": page_size,
+            "total_items": total,
+            "total_pages": (total + page_size - 1) // page_size,
+        }
+    }
 
 
 
@@ -281,7 +305,10 @@ async def get_beds(
 async def get_beds_by_room(
     room_id: str,
     request: Request,
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: str = Depends(get_current_user_id),
+    page : int = Query(1, ge=1),
+    page_size : int = Query(10, ge=1),
+    search: str | None = Query(None, description="Search by bed ID or designation"),
 ):
     user = await UserDoc.get(current_user_id)
     if not user:
@@ -321,21 +348,38 @@ async def get_beds_by_room(
             except Exception:
                 pass
         return str(getattr(bed_doc.room_id, "id", bed_doc.room_id))
+    
+    results = []
 
-    result = [
-        {
-            "id": str(b.id),
-            "bed_id": _decrypt_value(ce, b.bed_id),
-            "designation": _decrypt_value(ce, b.designation),
-            "status": _decrypt_value(ce, b.status),
-            "bariatric": _decrypt_value(ce, b.bariatric),
-            "room_id": await _safe_room_id(b),
-            "last_sanitized": b.last_sanitized,
-            "bed_policy": _decrypt_value(ce, b.bed_policy),
-            "created_at": b.created_at,
-            "updated_at": b.updated_at,
-        } for b in beds
-    ]
+    for b in beds:
+        bed_id = _decrypt_value(ce, b.bed_id)
+        designation = _decrypt_value(ce, b.designation)
+        if search:
+            search_lower = search.lower()
+            if (
+                search_lower not in str(bed_id or "").lower()
+                and search_lower not in str(designation or "").lower()
+            ):
+                continue
+        results.append({
+        "id": str(b.id),
+        "bed_id": bed_id,
+        "designation": designation,
+        "status": _decrypt_value(ce, b.status),
+        "bariatric": _decrypt_value(ce, b.bariatric),
+        "room_id": await _safe_room_id(b),
+        "last_sanitized": b.last_sanitized,
+        "bed_policy": _decrypt_value(ce, b.bed_policy),
+        "created_at": b.created_at,
+        "updated_at": b.updated_at,
+    })
+        
+    total = len(results)
+    start = (page - 1) * page_size
+    end = start + page_size
+    paginated_docs = results[start:end]
+
+    
 
     try:
         await log_audit(
@@ -350,7 +394,15 @@ async def get_beds_by_room(
     except Exception:
         pass
 
-    return result
+    return {
+        "items": paginated_docs,
+        "pagination" : {
+            "page": page,
+            "page_size": page_size,
+            "total_items": total,
+            "total_pages": (total + page_size - 1) // page_size,
+        }
+    }
 
 
 

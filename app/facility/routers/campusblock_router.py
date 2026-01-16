@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from app.accounts.models.user import UserDoc
 from app.facility.models.facility import Facility
-from fastapi import APIRouter, Request, HTTPException, Depends
+from fastapi import APIRouter, Request, HTTPException, Depends,Query
 from app.facility.models.campusblock import CampusBlock
 from app.schemas.facilities.campus_block import CampusBlockSchema
 from app.encryption.encryption import encrypt_value, decrypt_value, init_encryption, ensure_data_key
@@ -10,7 +10,6 @@ from app.auth.deps import get_current_user_id
 from app.utils.audit import log_audit
 
 router = APIRouter(prefix="/facility", tags=["Facility"])
-
 
 
 def _dec_str(client_encryption, encrypted_val):
@@ -140,6 +139,9 @@ async def get_campus_blocks(
     facility_id: str,
     request: Request,
     current_user_id: str = Depends(get_current_user_id),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1),
+    search: str | None = Query(None, description="Search by block code or block name"),
 ):
     ce = request.app.client_encryption
     if ce is None:
@@ -172,8 +174,17 @@ async def get_campus_blocks(
 
     
     docs = []
+    search_lower = search.lower() if search else None
     for d in campus_blocks:
         block_code, block_name = _extract_block_values(ce, d)
+        # 🔎 Search logic
+        if search_lower:
+            if (
+                search_lower not in str(block_code or "").lower()
+                and search_lower not in str(block_name or "").lower()
+            ):
+                continue
+
         docs.append({
             'id': str(d.id),
             'block_code': block_code,
@@ -181,6 +192,11 @@ async def get_campus_blocks(
             "created_at": d.created_at,
             "updated_at": d.updated_at,
         })
+
+    total = len(docs)
+    start = (page - 1) * page_size
+    end = start + page_size
+    paginated_docs = docs[start:end]
        
     
     
@@ -198,7 +214,16 @@ async def get_campus_blocks(
     except Exception:
         pass
 
-    return docs
+    return {
+        "items": paginated_docs,
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total_items": total,
+            "total_pages": (total + page_size - 1) // page_size,
+        }
+    }
+
 
 
 @router.put("/update/campusblock/{campus_block_id}/")

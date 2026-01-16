@@ -11,6 +11,7 @@ DEK_KEY_ALT_NAME = "healthcare_app_dek"
 # Sync pymongo client for ClientEncryption
 pymongo_client = MongoClient(settings.MONGO_URI)
 pymongo_key_vault = pymongo_client[settings.KEY_VAULT_DB][settings.KEY_VAULT_COLL]
+print("Pymongo MongoClient initialized for ClientEncryption.")
 
 
 def get_kms_providers():
@@ -26,7 +27,7 @@ def get_kms_providers():
 
 
 
-def init_encryption():
+def init_encryption():  
     kms_providers = get_kms_providers()
     return ClientEncryption(
         kms_providers,
@@ -70,8 +71,27 @@ def encrypt_value_deterministic(client_encryption, key_id, value):
         key_id=key_id
     )
 
-def decrypt_value(client_encryption, value: Binary):
+# def decrypt_value(client_encryption, value: Binary):
     
-    return client_encryption.decrypt(value)
+#     return client_encryption.decrypt(value)
 
 
+def decrypt_value(client_encryption, value: Binary):
+    if not value:
+        return None
+    raw = client_encryption.decrypt(value)
+    return raw.decode() if isinstance(raw, (bytes, bytearray)) else raw
+
+
+
+
+
+
+
+
+
+# def _dec_str(client_encryption, encrypted_val):
+#     if not encrypted_val:
+#         return None
+#     raw = decrypt_value(client_encryption, encrypted_val)
+#     return raw.decode() if isinstance(raw, (bytes, bytearray)) else raw

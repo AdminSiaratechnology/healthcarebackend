@@ -204,6 +204,8 @@ async def get_practice_by_provider(
         if isinstance(assigned_raw, (bytes, bytearray)):
             assigned_raw = assigned_raw.decode("utf-8")
 
+        
+
         return {
             "id": str(practice.id),
             "provider_id": str(provider.id),

@@ -48,6 +48,7 @@ from app.schedule.router.scheduler_router import router as scheduler_router
 from app.prescriptions.router.prescription_router import router as prescription_router
 from app.device.router.device_router import router as devices_router
 from app.PatientNotes.routers.notes_router import router as notes_router
+from app.ShiftManagement.routers.shift_router import router as shiftmanagement_router
 
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -159,6 +160,10 @@ app.include_router(devices_router)
 app.include_router(notes_router)
 
 
+
+# ---------------------------- Shift Management ------------------------------------
+
+app.include_router(shiftmanagement_router)
 
 
 
