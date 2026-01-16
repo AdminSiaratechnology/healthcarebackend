@@ -36,167 +36,6 @@ def _decrypt_json_field(client_encryption, encrypted_val):
     return json.loads(decrypted_raw)
 
 
-# @router.post("")
-# async def create_facility(
-#     request: Request,
-#     payload: FacilityCreate,
-#     current_user_id: str = Depends(get_current_user_id),
-# ):
-#     try:
-#         user = await UserDoc.get(current_user_id)
-#         if not user:
-#             raise HTTPException(status_code=404, detail="User not found")
-
-#         ce = request.app.client_encryption
-#         dek = request.app.dek_id
-
-#         body = json.dumps({
-#             "basic_info": payload.basic_info.model_dump(),
-#             "address_info": payload.address_info.model_dump(),
-#         })
-
-#         enc_basic = encrypt_value(ce, dek, body)
-
-#         facility = Facility(
-#             basic=enc_basic,
-#             created_by=user,
-#         )
-#         await facility.insert()
-
-#         await log_audit(
-#             request=request,
-#             user_id=current_user_id,
-#             action="CREATE",
-#             resource="facility",
-#             resource_id=str(facility.id),
-#             status="success",
-#             notes=f"Facility created by {current_user_id}"
-#         )
-
-#         return {
-#             "id": str(facility.id),
-#             "created_at": facility.created_at,
-#             "updated_at": facility.updated_at,
-#         }
-#     except HTTPException:
-#         raise
-#     except ValidationError as ve:
-#         raise HTTPException(status_code=400, detail=str(ve))
-#     except Exception as e:
-#         await log_audit(
-#             request=request,
-#             user_id=current_user_id,
-#             action="CREATE",
-#             resource="facility",
-#             resource_id="N/A",
-#             status="failed",
-#             notes=str(e)
-#         )
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
-
-# @router.post("")
-# async def create_facility(
-#     request: Request,
-#     payload: FacilityCreate,
-#     current_user_id: str = Depends(get_current_user_id),
-# ):
-#     try:
-#         # ----------------------------
-#         # 1️⃣ Fetch current user
-#         # ----------------------------
-#         user = await UserDoc.get(current_user_id)
-#         if not user:
-#             raise HTTPException(status_code=404, detail="User not found")
-
-#         # ----------------------------
-#         # 2️⃣ Ensure ClientEncryption & DEK
-#         # ----------------------------
-#         ce = getattr(request.app, "client_encryption", None)
-#         if ce is None:
-#             ce = init_encryption()
-#             request.app.client_encryption = ce
-
-#         dek = getattr(request.app, "dek_id", None)
-#         if dek is None:
-#             dek = ensure_data_key()
-#             request.app.dek_id = dek
-
-#         # ----------------------------
-#         # 3️⃣ Convert schema to JSON string & encrypt
-#         # ----------------------------
-#         payload_dict = {
-#             "basic_info": payload.basic_info.model_dump(),
-#             "address_info": payload.address_info.model_dump(),
-#         }
-
-#         json_body = json.dumps(payload_dict)
-#         enc_basic = encrypt_value(ce, dek, json_body)
-
-#         # ----------------------------
-#         # 4️⃣ Create Facility document
-#         # ----------------------------
-
-#         enc_name_det = encrypt_value_deterministic(ce, dek, payload.basic_info.facility_name)
-#         existing = await Facility.find_one({"facility_name": enc_name_det, "created_by.$id": ObjectId(user.id)})
-        
-#         if existing:
-#             raise HTTPException(status_code=400, detail="Facility with the same name already exists")
-        
-#         facility = Facility(
-#             basic=enc_basic,
-#             created_by=user,
-#             facility_name=enc_name_det,
-#         )
-#         await facility.insert()
-
-#         # ----------------------------
-#         # 5️⃣ Audit logging
-#         # ----------------------------
-#         try:
-#             await log_audit(
-#                 request=request,
-#                 user_id=current_user_id,
-#                 action="CREATE",
-#                 resource="facility",
-#                 resource_id=str(facility.id),
-#                 status="success",
-#                 notes=f"Facility created by {current_user_id}"
-#             )
-#         except Exception:
-#             pass  # audit failure should not break main logic
-
-#         # ----------------------------
-#         # 6️⃣ Response
-#         # ----------------------------
-#         return {
-#             "id": str(facility.id),
-#             "created_at": facility.created_at,
-#             "updated_at": facility.updated_at,
-#         }
-
-#     except HTTPException:
-#         raise
-#     except ValidationError as ve:
-#         raise HTTPException(status_code=400, detail=str(ve))
-#     except Exception as e:
-#         # audit on failure
-#         try:
-#             await log_audit(
-#                 request=request,
-#                 user_id=current_user_id,
-#                 action="CREATE",
-#                 resource="facility",
-#                 resource_id="N/A",
-#                 status="failed",
-#                 notes=str(e)
-#             )
-#         except Exception:
-#             pass
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
 
 
 @router.post("")
@@ -312,103 +151,22 @@ async def create_facility(
 
 
 
-# @router.get("")
-# async def get_facilities_for_user(
-#     request: Request,
-#     current_user_id: str = Depends(get_current_user_id),
-#     page: int = 1,
-#     page_size: int = 10,
-#     facility_type: str | None = None,
-#     facility_name: str | None = None,
-#     street_address: str | None = None,
-# ):
-#     try:
-#         user = await UserDoc.get(current_user_id)
-#         if not user:
-#             raise HTTPException(status_code=404, detail="User not found")
 
-#         facilities = await Facility.find(Facility.created_by.id == user.id).to_list()
-
-#         ce = request.app.client_encryption
-#         page = 1 if page < 1 else page
-#         page_size = 1 if page_size < 1 else (100 if page_size > 100 else page_size)
-
-#         filtered = []
-#         for facility in facilities:
-#             data = _decrypt_json_field(ce, facility.basic)
-#             bi = (data or {}).get("basic_info") or {}
-#             ai = (data or {}).get("address_info") or {}
-#             if facility_type and str(bi.get("facility_type", "")).lower() != facility_type.lower():
-#                 continue
-#             if facility_name and facility_name.lower() not in str(bi.get("facility_name", "")).lower():
-#                 continue
-#             if street_address and street_address.lower() not in str(ai.get("street_address", "")).lower():
-#                 continue
-#             filtered.append((facility, bi, ai))
-
-#         total = len(filtered)
-#         start = (page - 1) * page_size
-#         end = start + page_size
-
-#         items = []
-#         for facility, bi, ai in filtered[start:end]:
-#             count_link = await Beds.find(Beds.facility_id.id == facility.id).count()
-#             count_str = await Beds.find(Beds.facility_id == str(facility.id)).count()
-#             total_beds = count_link + count_str
-#             items.append({
-#                 "id": str(facility.id),
-#                 "basic_info": bi,
-#                 "address_info": ai,
-#                 "total_beds": total_beds,
-#                 "created_at": facility.created_at,
-#                 "updated_at": facility.updated_at,
-#             })
-
-#         await log_audit(
-#             request=request,
-#             user_id=current_user_id,
-#             action="READ",
-#             resource="facility",
-#             resource_id="list",
-#             status="success",
-#             notes=f"Facilities fetched by {current_user_id}"
-#         )
-
-#         return {
-#             "items": items,
-#             "page": page,
-#             "page_size": page_size,
-#             "total": total,
-#             "total_pages": ((total + page_size - 1) // page_size),
-#         }
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         await log_audit(
-#             request=request,
-#             action="READ",
-#             resource="facility",
-#             resource_id="list",
-#             status="failed",
-#             notes=str(e)
-#         )
-#         raise HTTPException(status_code=500, detail=str(e))
-
-
+    
 
 
 @router.get("")
 async def get_facilities(
     request: Request,
     current_user_id: str = Depends(get_current_user_id),
+
     # 🔹 pagination
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
 
-     # 🔹 search & filters
-    search: Optional[str] = Query(None, description="Search by facility name"),
-    status: Optional[str] = Query(None, description="active / inactive "),
-    facility_type: Optional[str] = Query(None, description="hospital / clinic / lab"),
+    # 🔹 filters
+    search: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
 ):
     try:
         # ----------------------------
@@ -419,34 +177,28 @@ async def get_facilities(
             raise HTTPException(status_code=404, detail="User not found")
 
         # ----------------------------
-        # 2️⃣ Ensure ClientEncryption
+        # 2️⃣ Encryption
         # ----------------------------
         ce = getattr(request.app, "client_encryption", None)
         if ce is None:
             ce = init_encryption()
             request.app.client_encryption = ce
-            
 
         # ----------------------------
-
-        # 3️⃣ Build DB query (indexed fields only)
+        # 3️⃣ Base query (user scope)
         # ----------------------------
-        query = {
+        base_query = {
             "created_by.$id": ObjectId(user.id)
         }
+
+        # ----------------------------
+        # 4️⃣ Build filtered query
+        # ----------------------------
+        query = base_query.copy()
+
         if status:
-           
             query["status"] = status.lower()
-            print("query status:", query["status"])
-            # try:
-            #     status_enum = FacilityStatus(status.lower())
-            #     print("status enum is hereeeee",status_enum)
-            # except ValueError:
-            #     raise HTTPException(status_code=400, detail="Invalid status. Use 'active' or 'inactive'.")
-            # query["status"] = status_enum.value
-            # print("query status:", query["status"])
-            # print("status filter applied:",status)
-        
+
         if search:
             enc_name = encrypt_value_deterministic(
                 ce,
@@ -454,13 +206,12 @@ async def get_facilities(
                 search
             )
             query["facility_name"] = enc_name
-            print("query search:", query["facility_name"])
-            
+
+        # ----------------------------
+        # 5️⃣ Pagination
         # ----------------------------
         skip = (page - 1) * page_size
 
-        # 3️⃣ Fetch facilities for this user
-        # ----------------------------
         facilities = (
             await Facility.find(query)
             .sort("-created_at")
@@ -469,10 +220,19 @@ async def get_facilities(
             .to_list()
         )
 
-        print("facilities fetched:",(facilities))
+        # ----------------------------
+        # 6️⃣ Counts (NO filters)
+        # ----------------------------
+        total_facilities = await Facility.find(base_query).count()
+        total_active = await Facility.find(
+            {**base_query, "status": "active"}
+        ).count()
+        total_inactive = await Facility.find(
+            {**base_query, "status": "inactive"}
+        ).count()
 
         # ----------------------------
-        # 4️⃣ Decrypt each facility's basic info
+        # 7️⃣ Decrypt response
         # ----------------------------
         result = []
         for f in facilities:
@@ -481,21 +241,27 @@ async def get_facilities(
                 "id": str(f.id),
                 "basic_info": basic_info.get("basic_info", {}),
                 "address_info": basic_info.get("address_info", {}),
-                "status": f.status.value if isinstance(f.status, FacilityStatus) else f.status,
+                "status": f.status,
                 "created_at": f.created_at,
                 "updated_at": f.updated_at
             })
 
+        # ----------------------------
+        # 8️⃣ Final response
+        # ----------------------------
         return {
             "page": page,
             "page_size": page_size,
-            "count": len(result),         
+            "count": len(result),
+            "total_facilities": total_facilities,
+            "total_active": total_active,
+            "total_inactive": total_inactive,
             "data": result,
         }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
+
 
 
 # from typing import List, Optional
@@ -707,6 +473,12 @@ async def update_facility_basic_info(
 
         enc_basic = encrypt_value(ce, dek, body)
         facility.basic = enc_basic
+        # ✅ UPDATE STATUS ONLY IF SENT
+        # ----------------------------
+        if payload.facility_status is not None:
+            facility.status = payload.facility_status.value
+            print("Status updated to:", facility.status)
+
         facility.updated_at = datetime.now(timezone.utc)
         await facility.save()
 
