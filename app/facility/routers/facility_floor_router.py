@@ -10,7 +10,7 @@ from app.facility.models.facility_floor import FacilityFloor
 from app.accounts.models.user import UserDoc
 from app.auth.deps import get_current_user_id
 from app.encryption.encryption import encrypt_value, decrypt_value
-from app.facility.routers.campusblock_router import _extract_block_values
+# from app.facility.routers.campusblock_router import _extract_block_values
 from app.utils.audit import log_audit
 from app.schemas.facilities.floor import FloorSchema
 from beanie import PydanticObjectId

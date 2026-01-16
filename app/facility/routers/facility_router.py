@@ -15,7 +15,7 @@ from app.schemas.facility import FacilityCreate, BrandingInfo, StructureInfo
 
 from app.accounts.models.user import UserDoc
 from app.auth.deps import get_current_user_id
-from app.encryption.encryption import encrypt_value, decrypt_value,init_encryption, ensure_data_key,encrypt_value_deterministic
+from app.encryption.encryption import encrypt_value, decrypt_value,init_encryption, ensure_data_key,encrypt_value_deterministic,_decrypt_json_field
 from app.utils.audit import log_audit
 import json
 import os
@@ -82,10 +82,14 @@ async def create_facility(
         # ----------------------------
         enc_name_det = encrypt_value_deterministic(ce, dek, payload.basic_info.facility_name)
 
+        
+
         existing = await Facility.find_one({
             "facility_name": enc_name_det,
             "created_by.$id": ObjectId(user.id)
         })
+
+        
 
         if existing:
             raise HTTPException(
@@ -155,6 +159,116 @@ async def create_facility(
     
 
 
+# @router.get("")
+# async def get_facilities(
+#     request: Request,
+#     current_user_id: str = Depends(get_current_user_id),
+
+#     # 🔹 pagination
+#     page: int = Query(1, ge=1),
+#     page_size: int = Query(10, ge=1, le=100),
+
+#     # 🔹 filters
+#     search: Optional[str] = Query(None),
+#     status: Optional[str] = Query(None),
+# ):
+#     try:
+#         # ----------------------------
+#         # 1️⃣ Fetch current user
+#         # ----------------------------
+#         user = await UserDoc.get(current_user_id)
+#         if not user:
+#             raise HTTPException(status_code=404, detail="User not found")
+
+#         # ----------------------------
+#         # 2️⃣ Encryption
+#         # ----------------------------
+#         ce = getattr(request.app, "client_encryption", None)
+#         if ce is None:
+#             ce = init_encryption()
+#             request.app.client_encryption = ce
+
+#         # ----------------------------
+#         # 3️⃣ Base query (user scope)
+#         # ----------------------------
+#         base_query = {
+#             "created_by.$id": ObjectId(user.id)
+#         }
+
+#         # ----------------------------
+#         # 4️⃣ Build filtered query
+#         # ----------------------------
+#         query = base_query.copy()
+
+#         if status:
+#             query["status"] = status.lower()
+
+#         if search:
+#             enc_name = encrypt_value_deterministic(
+#                 ce,
+#                 request.app.dek_id,
+#                 search
+#             )
+#             query["facility_name"] = enc_name
+
+#         # ----------------------------
+#         # 5️⃣ Pagination
+#         # ----------------------------
+#         skip = (page - 1) * page_size
+
+#         facilities = (
+#             await Facility.find(query)
+#             .sort("-created_at")
+#             .skip(skip)
+#             .limit(page_size)
+#             .to_list()
+#         )
+
+#         # ----------------------------
+#         # 6️⃣ Counts (NO filters)
+#         # ----------------------------
+#         total_facilities = await Facility.find(base_query).count()
+#         total_active = await Facility.find(
+#             {**base_query, "status": "active"}
+#         ).count()
+#         total_inactive = await Facility.find(
+#             {**base_query, "status": "inactive"}
+#         ).count()
+
+#         # ----------------------------
+#         # 7️⃣ Decrypt response
+#         # ----------------------------
+#         result = []
+#         filtered = []
+#         for f in facilities:
+#             basic_info = json.loads(decrypt_value(ce, f.basic)) if f.basic else {}
+#             result.append({
+#                 "id": str(f.id),
+#                 "basic_info": basic_info.get("basic_info", {}),
+#                 "address_info": basic_info.get("address_info", {}),
+#                 "status": f.status,
+#                 "created_at": f.created_at,
+#                 "updated_at": f.updated_at
+#             })
+
+#         # ----------------------------
+#         # 8️⃣ Final response
+#         # ----------------------------
+#         return {
+#             "page": page,
+#             "page_size": page_size,
+#             "count": len(result),
+#             "total_facilities": total_facilities,
+#             "total_active": total_active,
+#             "total_inactive": total_inactive,
+#             "data": result,
+#         }
+
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+
 @router.get("")
 async def get_facilities(
     request: Request,
@@ -169,61 +283,34 @@ async def get_facilities(
     status: Optional[str] = Query(None),
 ):
     try:
-        # ----------------------------
         # 1️⃣ Fetch current user
-        # ----------------------------
         user = await UserDoc.get(current_user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        # ----------------------------
-        # 2️⃣ Encryption
-        # ----------------------------
+        # 2️⃣ Encryption client
         ce = getattr(request.app, "client_encryption", None)
         if ce is None:
             ce = init_encryption()
             request.app.client_encryption = ce
 
-        # ----------------------------
-        # 3️⃣ Base query (user scope)
-        # ----------------------------
-        base_query = {
-            "created_by.$id": ObjectId(user.id)
-        }
-
-        # ----------------------------
-        # 4️⃣ Build filtered query
-        # ----------------------------
-        query = base_query.copy()
-
+        # 3️⃣ Base query (user scope + status filter)
+        base_query = {"created_by.$id": ObjectId(user.id)}
         if status:
-            query["status"] = status.lower()
+            base_query["status"] = status.lower()
 
-        if search:
-            enc_name = encrypt_value_deterministic(
-                ce,
-                request.app.dek_id,
-                search
-            )
-            query["facility_name"] = enc_name
+        # 4️⃣ Fetch all matching user scope (MongoDB-level filter)
+        facilities = await Facility.find(base_query).sort("-created_at").to_list()
 
-        # ----------------------------
-        # 5️⃣ Pagination
-        # ----------------------------
-        skip = (page - 1) * page_size
 
-        facilities = (
-            await Facility.find(query)
-            .sort("-created_at")
-            .skip(skip)
-            .limit(page_size)
-            .to_list()
-        )
+        
+        # 5️⃣ Decrypt and filter (search across fields)
+        filtered = []
 
         # ----------------------------
         # 6️⃣ Counts (NO filters)
         # ----------------------------
-        total_facilities = await Facility.find(base_query).count()
+        # total_facilities = await Facility.find(base_query).count()
         total_active = await Facility.find(
             {**base_query, "status": "active"}
         ).count()
@@ -231,29 +318,55 @@ async def get_facilities(
             {**base_query, "status": "inactive"}
         ).count()
 
-        # ----------------------------
-        # 7️⃣ Decrypt response
-        # ----------------------------
-        result = []
+        search_lower = search.lower() if search else None
+
         for f in facilities:
-            basic_info = json.loads(decrypt_value(ce, f.basic)) if f.basic else {}
+            basic_data = _decrypt_json_field(ce, f.basic) or {}
+            bi = basic_data.get("basic_info", {})
+            ai = basic_data.get("address_info", {})
+
+            # partial search across multiple fields
+            if search_lower:
+                match = False
+                for field_value in [
+                    bi.get("facility_name", ""),
+                    bi.get("facility_code", ""),
+                    ai.get("street_address", ""),
+                   
+                ]:
+                    if search_lower in str(field_value).lower():
+                        match = True
+                        break
+                if not match:
+                    continue
+
+            filtered.append((f, bi, ai))
+
+        # 6️⃣ Pagination
+        total = len(filtered)
+        start = (page - 1) * page_size
+        end = start + page_size
+        paginated = filtered[start:end]
+
+        # 7️⃣ Prepare response
+        result = []
+        for f, bi, ai in paginated:
             result.append({
                 "id": str(f.id),
-                "basic_info": basic_info.get("basic_info", {}),
-                "address_info": basic_info.get("address_info", {}),
+                "basic_info": bi,
+                "address_info": ai,
                 "status": f.status,
                 "created_at": f.created_at,
                 "updated_at": f.updated_at
             })
 
-        # ----------------------------
-        # 8️⃣ Final response
-        # ----------------------------
+        # 8️⃣ Return final response
         return {
             "page": page,
             "page_size": page_size,
             "count": len(result),
-            "total_facilities": total_facilities,
+            "total_pages": ((total + page_size - 1) // page_size),
+            "total_facilities": total,
             "total_active": total_active,
             "total_inactive": total_inactive,
             "data": result,
@@ -263,107 +376,6 @@ async def get_facilities(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
-# from typing import List, Optional
-# from fastapi import Query
-# from bson import ObjectId
-# import json
-
-
-# @router.get("/facilities")
-# async def get_facilities(
-#     request: Request,
-#     current_user_id: str = Depends(get_current_user_id),
-
-#     # 🔹 pagination
-#     page: int = Query(1, ge=1),
-#     limit: int = Query(10, ge=1, le=100),
-
-#     # 🔹 filters
-#     search: Optional[str] = Query(None, description="Search by facility name"),
-#     facility_type: Optional[str] = Query(None, description="hospital / clinic / lab"),
-#     status: Optional[str] = Query(None, description="active / inactive / archived"),
-# ):
-#     try:
-#         # ----------------------------
-#         # 1️⃣ Fetch user
-#         # ----------------------------
-#         user = await UserDoc.get(current_user_id)
-#         if not user:
-#             raise HTTPException(status_code=404, detail="User not found")
-
-#         # ----------------------------
-#         # 2️⃣ Ensure encryption
-#         # ----------------------------
-#         ce = getattr(request.app, "client_encryption", None)
-#         if ce is None:
-#             ce = init_encryption()
-#             request.app.client_encryption = ce
-
-#         # ----------------------------
-#         # 3️⃣ Build DB query
-#         # ----------------------------
-#         query = {
-#             "created_by.$id": ObjectId(user.id)
-#         }
-
-#         # status filter (fast, indexed)
-#         if status:
-#             query["status"] = status
-
-#         # deterministic search on facility_name
-#         if search:
-#             enc_name = encrypt_value_deterministic(
-#                 ce,
-#                 request.app.dek_id,
-#                 search
-#             )
-#             query["facility_name"] = enc_name
-
-#         skip = (page - 1) * limit
-
-#         facilities = (
-#             await Facility.find(query)
-#             .sort("-created_at")
-#             .skip(skip)
-#             .limit(limit)
-#             .to_list()
-#         )
-
-#         # ----------------------------
-#         # 4️⃣ Decrypt + in-memory filter
-#         # ----------------------------
-#         result = []
-#         for f in facilities:
-#             decrypted = json.loads(decrypt_value(ce, f.basic)) if f.basic else {}
-
-#             basic_info = decrypted.get("basic_info", {})
-#             address_info = decrypted.get("address_info", {})
-
-#             # facility_type filter (post-decrypt)
-#             if facility_type and basic_info.get("facility_type") != facility_type:
-#                 continue
-
-#             result.append({
-#                 "id": str(f.id),
-#                 "facility_name": basic_info.get("facility_name"),
-#                 "facility_type": basic_info.get("facility_type"),
-#                 "status": f.status,  # 👈 ACTIVE / INACTIVE / ARCHIVED
-#                 "basic_info": basic_info,
-#                 "address_info": address_info,
-#                 "created_at": (f.created_at),
-#                 "updated_at": (f.updated_at),
-#             })
-
-#         return {
-#             "page": page,
-#             "page_size": limit,
-#             "total": len(result),
-#             "data": result,
-#         }
-
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{facility_id}")
 async def get_facility_by_id(

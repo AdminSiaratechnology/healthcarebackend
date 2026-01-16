@@ -3,7 +3,7 @@ from pymongo import MongoClient
 from bson.binary import Binary
 from bson.codec_options import CodecOptions
 from app.database.config import settings
-
+import json
 
 KEY_VAULT_NAMESPACE = f"{settings.KEY_VAULT_DB}.{settings.KEY_VAULT_COLL}"
 DEK_KEY_ALT_NAME = "healthcare_app_dek"
@@ -75,12 +75,33 @@ def encrypt_value_deterministic(client_encryption, key_id, value):
     
 #     return client_encryption.decrypt(value)
 
+def encrypt_dict(client_encryption, dek_id, data: dict):
+    encrypted = {}
+    for key, value in data.items():
+        if value is None:
+            encrypted[key] = None
+        else:
+            encrypted[key] = encrypt_value(client_encryption, dek_id, value)
+    return encrypted
+
+
 
 def decrypt_value(client_encryption, value: Binary):
     if not value:
         return None
     raw = client_encryption.decrypt(value)
     return raw.decode() if isinstance(raw, (bytes, bytearray)) else raw
+
+
+
+def _decrypt_json_field(client_encryption, encrypted_val):
+    if not encrypted_val:
+        return None
+    decrypted_raw = decrypt_value(client_encryption, encrypted_val)
+    if isinstance(decrypted_raw, (bytes, bytearray)):
+        decrypted_raw = decrypted_raw.decode()
+    return json.loads(decrypted_raw)
+
 
 
 

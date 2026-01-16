@@ -12,6 +12,8 @@ from app.facility.models.facility import Facility
 class CampusBlock(Document, AutoEncryptMixin, AutoDecryptMixin):
     block_code: Binary | None = None
     block_name: Binary | None = None
+    # 🔍 Searchable / unique check (Deterministic encryption)
+    block_name_det: Annotated[Binary, Indexed()]
     facility_id: Link[Facility] | None = None
     status: Annotated[str, Indexed()] = "active"
     created_by: Link[UserDoc] | None = None
@@ -23,6 +25,6 @@ class CampusBlock(Document, AutoEncryptMixin, AutoDecryptMixin):
     class Settings:
         name = "campus_blocks"
         indexes = [
-            [("facility_id.$id", 1), ("created_by.$id", 1)],
+            [("facility_id.$id", 1), ("block_name_det", 1)],  # ✅ uniqueness scope
             [("status", 1), ("facility_id.$id", 1)],
         ]
