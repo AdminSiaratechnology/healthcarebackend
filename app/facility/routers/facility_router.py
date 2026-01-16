@@ -396,7 +396,7 @@ async def create_facility(
 
 
 
-@router.get("/facilities")
+@router.get("")
 async def get_facilities(
     request: Request,
     current_user_id: str = Depends(get_current_user_id),
