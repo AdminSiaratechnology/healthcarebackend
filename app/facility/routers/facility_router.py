@@ -260,6 +260,7 @@ async def create_facility(
         facility = Facility(
             basic=enc_basic,
             facility_name=enc_name_det,
+            status=payload.facility_status.value, 
             created_by=user
         )
         await facility.insert()
@@ -434,12 +435,17 @@ async def get_facilities(
             "created_by.$id": ObjectId(user.id)
         }
         if status:
-            try:
-                status_enum = FacilityStatus(status.lower())
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Invalid status. Use 'active' or 'inactive'.")
-            query["status"] = status_enum.value
-            print("status filter applied:",status.lower())
+           
+            query["status"] = status.lower()
+            print("query status:", query["status"])
+            # try:
+            #     status_enum = FacilityStatus(status.lower())
+            #     print("status enum is hereeeee",status_enum)
+            # except ValueError:
+            #     raise HTTPException(status_code=400, detail="Invalid status. Use 'active' or 'inactive'.")
+            # query["status"] = status_enum.value
+            # print("query status:", query["status"])
+            # print("status filter applied:",status)
         
         if search:
             enc_name = encrypt_value_deterministic(
@@ -448,6 +454,7 @@ async def get_facilities(
                 search
             )
             query["facility_name"] = enc_name
+            print("query search:", query["facility_name"])
             
         # ----------------------------
         skip = (page - 1) * page_size

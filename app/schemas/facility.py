@@ -5,6 +5,10 @@ from enum import Enum
 
 
 
+class FacilityStatus(str, Enum):
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+
 
 class FacilityType(str, Enum):
     HOSPITAL = "hospital"
@@ -19,7 +23,6 @@ class BasicInfo(BaseModel):
     facility_type: Optional[FacilityType] = None
     main_phone: Optional[str] = None
     facility_code: Optional[str] = None
-    main_phone: Optional[str] = None
     fax: Optional[str] = None
     general_email:  Optional[str] = None
     website_url: Optional[str] = None
@@ -39,6 +42,7 @@ class AddressInfo(BaseModel):
 
 
 class FacilityCreate(BaseModel):
+    facility_status: Optional[FacilityStatus] = FacilityStatus.ACTIVE
     basic_info: BasicInfo
     address_info: AddressInfo
 

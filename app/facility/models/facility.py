@@ -5,11 +5,8 @@ from datetime import datetime, timezone
 from typing import Annotated
 from pydantic import Field, ConfigDict
 from app.accounts.models.user import UserDoc
+from app.schemas.facility import FacilityStatus
 
-
-class FacilityStatus(str, Enum):
-    ACTIVE = "active"
-    INACTIVE = "inactive"
 
 
 class Facility(Document):
@@ -20,7 +17,7 @@ class Facility(Document):
     facility_name: Annotated[Binary | None, Indexed()] = None
 
     # plaintext enum (fast filter)
-    status: Annotated[FacilityStatus, Indexed()] = FacilityStatus.ACTIVE
+    status: Annotated[str, Indexed()] = "active"
 
     created_by: Link[UserDoc] | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
