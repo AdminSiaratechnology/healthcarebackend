@@ -222,6 +222,13 @@ async def create_campus_block(
 async def get_all_campus_blocks(
     request: Request,
     current_user_id: str = Depends(get_current_user_id),
+     # 🔹 pagination
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+
+    # 🔹 filters
+    search: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
 ):
     try:
         # 1️⃣ User
@@ -235,17 +242,46 @@ async def get_all_campus_blocks(
             ce = init_encryption()
             request.app.client_encryption = ce
 
+        # ----------------------------
+        # 3️⃣ Base query (user scope)
+        # ----------------------------
+        base_query = {
+            "created_by.$id": ObjectId(user.id)
+        }
+
+        # ----------------------------
+        # 4️⃣ Build filtered query
+        # ----------------------------
+        query = base_query.copy()
+
+        if status:
+            query["status"] = status.lower()
+        
+        if search:
+            query["block_name_search"] = {
+                "$regex": f"^{search.lower()}"
+            }
+
+        # ----------------------------
+        # 5️⃣ Pagination
+        # ----------------------------
+        skip = (page - 1) * page_size
+
         # 3️⃣ Fetch all campus blocks created by this user
         # campus_blocks = await CampusBlock.find({
         #     "created_by.$id": user.id,
         #     "is_deleted": False,
         # }).to_list()
 
-        campus_blocks = await CampusBlock.find(
-            CampusBlock.created_by.id == user.id,
-            CampusBlock.is_deleted == False,
-            # fetch_links=True
-        ).to_list()
+
+        campus_blocks = (
+            await CampusBlock.find(query)
+            .sort("-created_at")
+            .skip(skip)
+            .limit(page_size)
+            .to_list()
+        )
+        
         # 4️⃣ Decrypt response
         result = []
         for block in campus_blocks:
@@ -255,18 +291,23 @@ async def get_all_campus_blocks(
                 "id": str(block.id),
                 "block_name":  decrypt_value(ce, block.block_name),
                 "block_code": decrypt_value(ce,block.block_code),
-                "facility_name": (
-                    block.facility_id.facility_name_search
-                    if block.facility_id
-                    else None
-                ),
+                'facility_name': "Main Hospital",
+                # "facility_name": (
+                #     block.facility_id
+                #     if block.facility_id
+                #     else None
+                # ),
                 "status": block.status,
                 "created_at": block.created_at,
                 "updated_at": block.updated_at,
             })
+        total = len(result)
 
         return {
             "success": True,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": ((total + page_size - 1) // page_size),
             "count": len(result),
             "data": result,
         }
