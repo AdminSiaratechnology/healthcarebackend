@@ -11,7 +11,7 @@ from app.utils.audit import log_audit
 from bson import ObjectId
 from typing import Annotated, Optional
 
-router = APIRouter(prefix="/facility", tags=["Facility"])
+router = APIRouter(prefix="/campusblock", tags=["Masters"])
 
 
 
@@ -116,7 +116,7 @@ router = APIRouter(prefix="/facility", tags=["Facility"])
 #         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
-@router.post("/create/campusblock/{facility_id}/")
+@router.post("/create/{facility_id}/")
 async def create_campus_block(
     facility_id: str,
     payload: CampusBlockSchema,
@@ -216,6 +216,66 @@ async def create_campus_block(
         print("❌ Crash:", e)
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
+
+
+@router.get("/list/")
+async def get_all_campus_blocks(
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    try:
+        # 1️⃣ User
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # 2️⃣ Encryption init
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+
+        # 3️⃣ Fetch all campus blocks created by this user
+        # campus_blocks = await CampusBlock.find({
+        #     "created_by.$id": user.id,
+        #     "is_deleted": False,
+        # }).to_list()
+
+        campus_blocks = await CampusBlock.find(
+            CampusBlock.created_by.id == user.id,
+            CampusBlock.is_deleted == False,
+            # fetch_links=True
+        ).to_list()
+        # 4️⃣ Decrypt response
+        result = []
+        for block in campus_blocks:
+            
+
+            result.append({
+                "id": str(block.id),
+                "block_name":  decrypt_value(ce, block.block_name),
+                "block_code": decrypt_value(ce,block.block_code),
+                "facility_name": (
+                    block.facility_id.facility_name_search
+                    if block.facility_id
+                    else None
+                ),
+                "status": block.status,
+                "created_at": block.created_at,
+                "updated_at": block.updated_at,
+            })
+
+        return {
+            "success": True,
+            "count": len(result),
+            "data": result,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("❌ Crash:", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
 @router.get("/get/campusblock/{facility_id}/")
