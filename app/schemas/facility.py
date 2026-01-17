@@ -42,6 +42,7 @@ class AddressInfo(BaseModel):
 
 
 class FacilityCreate(BaseModel):
+    facility_name : str
     facility_status: Optional[FacilityStatus] = FacilityStatus.ACTIVE
     basic_info: BasicInfo
     address_info: AddressInfo

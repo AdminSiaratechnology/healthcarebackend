@@ -128,7 +128,7 @@ async def get_campus_blocks(
     page_size: int = Query(10, ge=1, le=100),
 
     # 🔹 filters
-    search: Optional[str] = Query(None),
+    search: str | None = Query(None, description="Search by block code or block name"),
 
 
 ):
@@ -139,6 +139,8 @@ async def get_campus_blocks(
         user = await UserDoc.get(current_user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
+        
+        
 
         # ----------------------------
         # 2️⃣ Encryption
@@ -195,6 +197,7 @@ async def get_campus_blocks(
         # 7️⃣ Decrypt response
         # ----------------------------
         result = []
+        
         for cb in campus_block:
            
             result.append({

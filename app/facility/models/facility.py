@@ -13,9 +13,9 @@ class Facility(Document):
     # encrypted full payload
     basic: Binary | None = None
 
-    # deterministic encrypted (queryable)
-    facility_name: Annotated[Binary | None, Indexed()] = None
-
+    # 🟢 searchable plain text
+    facility_name_search: Annotated[str, Indexed()]
+    
     # plaintext enum (fast filter)
     status: Annotated[str, Indexed()] = "active"
 
@@ -28,6 +28,6 @@ class Facility(Document):
     class Settings:
         name = "facilities"
         indexes = [
-            [("facility_name", 1), ("created_by.$id", 1)],
+            [("facility_name_search", 1), ("created_by.$id", 1)],
             [("status", 1), ("created_by.$id", 1)],
         ]
