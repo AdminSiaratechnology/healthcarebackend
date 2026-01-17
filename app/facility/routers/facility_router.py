@@ -437,6 +437,77 @@ async def get_facility_by_id(
 
 
 
+# @router.put("/basic-info/{facility_id}/")
+# async def update_facility_basic_info(
+#     facility_id: str,
+#     payload: FacilityCreate,
+#     request: Request,
+#     current_user_id: str = Depends(get_current_user_id),
+# ):
+#     try:
+#         user = await UserDoc.get(current_user_id)
+#         if not user:
+#             raise HTTPException(status_code=404, detail="User not found")
+
+#         try:
+#             obj_id = PydanticObjectId(facility_id)
+#         except Exception:
+#             raise HTTPException(status_code=400, detail="Invalid Facility ID format")
+
+#         facility = await Facility.get(obj_id)
+#         if not facility:
+#             raise HTTPException(status_code=404, detail="Facility not found")
+
+#         ce = request.app.client_encryption
+#         dek = request.app.dek_id
+
+#         body = json.dumps({
+#             "basic_info": payload.basic_info.model_dump(),
+#             "address_info": payload.address_info.model_dump(),
+#         })
+
+#         enc_basic = encrypt_value(ce, dek, body)
+#         facility.basic = enc_basic
+#         # ✅ UPDATE STATUS ONLY IF SENT
+#         # ----------------------------
+#         if payload.facility_status is not None:
+#             facility.status = payload.facility_status.value
+#             print("Status updated to:", facility.status)
+
+#         facility.updated_at = datetime.now(timezone.utc)
+#         await facility.save()
+
+#         await log_audit(
+#             request=request,
+#             user_id=current_user_id,
+#             action="UPDATE",
+#             resource="facility",
+#             resource_id=str(facility.id),
+#             status="success",
+#             notes=f"Facility basic info updated by {current_user_id}"
+#         )
+
+#         return {
+#             "success": True,
+#             "id": str(facility.id),
+#             "updated_at": facility.updated_at,
+#         }
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         await log_audit(
+#             request=request,
+#             user_id=current_user_id,
+#             action="UPDATE",
+#             resource="facility",
+#             resource_id=facility_id,
+#             status="failed",
+#             notes=str(e)
+#         )
+#         raise HTTPException(status_code=500, detail=str(e)) 
+
+
+
 @router.put("/basic-info/{facility_id}/")
 async def update_facility_basic_info(
     facility_id: str,
@@ -445,10 +516,16 @@ async def update_facility_basic_info(
     current_user_id: str = Depends(get_current_user_id),
 ):
     try:
+        # ----------------------------
+        # 1️⃣ Fetch user
+        # ----------------------------
         user = await UserDoc.get(current_user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
+        # ----------------------------
+        # 2️⃣ Validate facility ID
+        # ----------------------------
         try:
             obj_id = PydanticObjectId(facility_id)
         except Exception:
@@ -458,50 +535,97 @@ async def update_facility_basic_info(
         if not facility:
             raise HTTPException(status_code=404, detail="Facility not found")
 
+        # ----------------------------
+        # 3️⃣ Encryption client & DEK
+        # ----------------------------
         ce = request.app.client_encryption
         dek = request.app.dek_id
 
+        # ----------------------------
+        # 4️⃣ Normalize facility name (SOURCE OF TRUTH)
+        # ----------------------------
+        facility_name = payload.basic_info.facility_name.strip()
+        facility_name_search = facility_name.lower()
+
+        # ----------------------------
+        # 5️⃣ Duplicate check (per user)
+        # ----------------------------
+        existing = await Facility.find_one({
+            "created_by.$id": ObjectId(user.id),
+            "facility_name_search": facility_name_search,
+            "_id": {"$ne": facility.id}
+        })
+
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Facility '{facility_name}' already exists"
+            )
+
+        # ----------------------------
+        # 6️⃣ Encrypt full payload
+        # ----------------------------
         body = json.dumps({
             "basic_info": payload.basic_info.model_dump(),
             "address_info": payload.address_info.model_dump(),
         })
 
         enc_basic = encrypt_value(ce, dek, body)
-        facility.basic = enc_basic
-        # ✅ UPDATE STATUS ONLY IF SENT
+
         # ----------------------------
+        # 7️⃣ Update fields
+        # ----------------------------
+        facility.basic = enc_basic
+        facility.facility_name_search = facility_name_search
+
         if payload.facility_status is not None:
             facility.status = payload.facility_status.value
-            print("Status updated to:", facility.status)
 
         facility.updated_at = datetime.now(timezone.utc)
         await facility.save()
 
-        await log_audit(
-            request=request,
-            user_id=current_user_id,
-            action="UPDATE",
-            resource="facility",
-            resource_id=str(facility.id),
-            status="success",
-            notes=f"Facility basic info updated by {current_user_id}"
-        )
+        # ----------------------------
+        # 8️⃣ Audit log
+        # ----------------------------
+        try:
+            await log_audit(
+                request=request,
+                user_id=current_user_id,
+                action="UPDATE",
+                resource="facility",
+                resource_id=str(facility.id),
+                status="success",
+                notes=f"Facility '{facility_name}' updated by {current_user_id}"
+            )
+        except Exception:
+            pass
 
+        # ----------------------------
+        # 9️⃣ Response
+        # ----------------------------
         return {
             "success": True,
             "id": str(facility.id),
             "updated_at": facility.updated_at,
         }
+
     except HTTPException:
         raise
     except Exception as e:
-        await log_audit(
-            request=request,
-            user_id=current_user_id,
-            action="UPDATE",
-            resource="facility",
-            resource_id=facility_id,
-            status="failed",
-            notes=str(e)
-        )
-        raise HTTPException(status_code=500, detail=str(e)) 
+        try:
+            await log_audit(
+                request=request,
+                user_id=current_user_id,
+                action="UPDATE",
+                resource="facility",
+                resource_id=facility_id,
+                status="failed",
+                notes=str(e)
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
+
+

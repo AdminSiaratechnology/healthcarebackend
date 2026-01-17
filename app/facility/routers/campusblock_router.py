@@ -15,6 +15,107 @@ router = APIRouter(prefix="/facility", tags=["Facility"])
 
 
 
+# @router.post("/create/campusblock/{facility_id}/")
+# async def create_campus_block(
+#     facility_id: str,
+#     payload: CampusBlockSchema,
+#     request: Request,
+#     current_user_id: str = Depends(get_current_user_id),
+# ):
+#     try:
+#         # 1️⃣ User
+#         user = await UserDoc.get(current_user_id)
+#         if not user:
+#             raise HTTPException(status_code=404, detail="User not found")
+
+#         # 2️⃣ Encryption
+#         ce = getattr(request.app, "client_encryption", None)
+#         if ce is None:
+#             ce = init_encryption()
+#             request.app.client_encryption = ce
+
+#         dek_id = getattr(request.app, "dek_id", None)
+#         if dek_id is None:
+#             dek_id = ensure_data_key()
+#             request.app.dek_id = dek_id
+
+#         # 3️⃣ Facility ownership check
+#         facility = await Facility.find_one({
+#             "_id": ObjectId(facility_id),
+#             "created_by.$id": ObjectId(user.id)
+#         })
+#         if not facility:
+#             raise HTTPException(status_code=404, detail="Facility not found")
+
+#         # 4️⃣ Deterministic encryption (FOR UNIQUE CHECK)
+       
+#         enc_block_name_det = encrypt_value_deterministic(ce, dek_id, payload.block_name)
+        
+
+        
+
+       
+
+#         existing = await CampusBlock.find_one({
+#             "block_name_det": enc_block_name_det,
+#             "facility_id.$id": facility.id
+#         })
+       
+
+#         if existing:
+#             raise HTTPException(
+#                 status_code=400,
+#                 detail="Campus block with the same name already exists"
+#             )
+
+#         # 5️⃣ Random encryption (FOR STORAGE)
+#         encrypted = encrypt_dict(
+#             ce,
+#             dek_id,
+#             {
+#                 "block_code": payload.block_code,
+#                 "block_name": payload.block_name,
+#             }
+#         )
+
+#         # 6️⃣ Save
+#         campus_block = CampusBlock(
+#             block_name_det = enc_block_name_det,
+#             block_code=encrypted["block_code"],
+#             block_name=encrypted["block_name"],
+#             facility_id=facility,   # ✅ Link object
+#             created_by=user,
+#             created_at=datetime.now(timezone.utc),
+#             updated_at=datetime.now(timezone.utc),
+#         )
+
+#         await campus_block.insert()
+
+#         # 7️⃣ Audit
+#         try:
+#             await log_audit(
+#                 request=request,
+#                 user_id=str(user.id),
+#                 action="Create",
+#                 resource="Campus Block",
+#                 resource_id=str(campus_block.id),
+#                 status="success",
+#             )
+#         except Exception:
+#             pass
+
+#         return {
+#             "success": True,
+#             "campus_block_id": str(campus_block.id),
+#         }
+
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         print("❌ Crash:", e)
+#         raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
 @router.post("/create/campusblock/{facility_id}/")
 async def create_campus_block(
     facility_id: str,
@@ -28,7 +129,7 @@ async def create_campus_block(
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        # 2️⃣ Encryption
+        # 2️⃣ Encryption init
         ce = getattr(request.app, "client_encryption", None)
         if ce is None:
             ce = init_encryption()
@@ -42,33 +143,31 @@ async def create_campus_block(
         # 3️⃣ Facility ownership check
         facility = await Facility.find_one({
             "_id": ObjectId(facility_id),
-            "created_by.$id": ObjectId(user.id)
+            "created_by.$id": ObjectId(user.id),
+            # "is_deleted": False
         })
         if not facility:
             raise HTTPException(status_code=404, detail="Facility not found")
 
-        # 4️⃣ Deterministic encryption (FOR UNIQUE CHECK)
+        # 4️⃣ Normalize name (VERY IMPORTANT)
+        normalized_block_name = payload.block_name.strip().lower()
+
+        # 5️⃣ Deterministic encryption (duplicate check)
        
-        enc_block_name_det = encrypt_value_deterministic(ce, dek_id, payload.block_name)
-        
-
-        
-
-       
-
+        # 6️⃣ Duplicate validation (ACTIVE RECORDS ONLY)
         existing = await CampusBlock.find_one({
-            "block_name_det": enc_block_name_det,
-            "facility_id.$id": facility.id
+            "facility_id.$id": facility.id,
+            "block_name_search": normalized_block_name,
+            # "is_deleted": False
         })
-       
 
         if existing:
             raise HTTPException(
                 status_code=400,
-                detail="Campus block with the same name already exists"
+                detail="Campus block with this name already exists in this facility"
             )
 
-        # 5️⃣ Random encryption (FOR STORAGE)
+        # 7️⃣ Random encryption (actual storage)
         encrypted = encrypt_dict(
             ce,
             dek_id,
@@ -78,26 +177,28 @@ async def create_campus_block(
             }
         )
 
-        # 6️⃣ Save
+        # 8️⃣ Save
         campus_block = CampusBlock(
-            block_name_det = enc_block_name_det,
+            block_name_search=normalized_block_name,        # 🔎 search
             block_code=encrypted["block_code"],
             block_name=encrypted["block_name"],
-            facility_id=facility,   # ✅ Link object
+            facility_id=facility,
             created_by=user,
+            status="active",
+            is_deleted=False,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
 
         await campus_block.insert()
 
-        # 7️⃣ Audit
+        # 9️⃣ Audit
         try:
             await log_audit(
                 request=request,
                 user_id=str(user.id),
-                action="Create",
-                resource="Campus Block",
+                action="CREATE",
+                resource="campus_block",
                 resource_id=str(campus_block.id),
                 status="success",
             )
