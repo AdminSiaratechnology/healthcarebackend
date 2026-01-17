@@ -10,6 +10,7 @@ from app.auth.deps import get_current_user_id
 from app.utils.audit import log_audit
 from bson import ObjectId
 from typing import Annotated, Optional
+from beanie import PydanticObjectId
 
 router = APIRouter(prefix="/campusblock", tags=["Masters"])
 
@@ -285,13 +286,19 @@ async def get_all_campus_blocks(
         # 4️⃣ Decrypt response
         result = []
         for block in campus_blocks:
+           
+            # if block.facility_id:
+            #    ss =  await block.fetch_link("facility_id")
+            #    print("sssssssssss",ss)
             
 
             result.append({
                 "id": str(block.id),
                 "block_name":  decrypt_value(ce, block.block_name),
                 "block_code": decrypt_value(ce,block.block_code),
+                "facility_id": str(block.facility_id.ref.id) if block.facility_id else None,
                 'facility_name': "Main Hospital",
+                
                 # "facility_name": (
                 #     block.facility_id
                 #     if block.facility_id
@@ -420,6 +427,129 @@ async def get_campus_blocks(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+@router.put("/update/campusblock/{block_id}/")
+async def update_campus_block(
+    block_id: str,
+    payload: CampusBlockSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    try:
+        # 1️⃣ User
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # 2️⃣ Encryption
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+            request.app.dek_id = dek_id
+
+        # 3️⃣ Validate block id
+        try:
+            block_obj_id = PydanticObjectId(block_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid Campus Block ID")
+
+        # 4️⃣ Fetch campus block (ACTIVE only)
+        campus_block = await CampusBlock.find_one({
+            
+            "created_by.$id": ObjectId(user.id),
+            "is_deleted": False
+        })
+
+        if not campus_block:
+            raise HTTPException(status_code=404, detail="Campus block not found")
+
+        # 5️⃣ Normalize name
+        normalized_block_name = payload.block_name.strip().lower()
+
+        # 6️⃣ If name changed → duplicate check
+
+        
+
+
+        # if normalized_block_name != campus_block.block_name_search:
+        #     duplicate = await CampusBlock.find_one({
+        #         "facility_id.$id": campus_block.facility_id.id,
+        #         "block_name_search": normalized_block_name,
+        #         "is_deleted": False,
+        #         "_id": {"$ne": campus_block.id}
+        #     })
+
+        #     if duplicate:
+        #         raise HTTPException(
+        #             status_code=400,
+        #             detail="Campus block with this name already exists in this facility"
+        #         )
+
+            # ✅ Update deterministic + search
+            
+            # campus_block.block_name_search = normalized_block_name
+
+        # 7️⃣ Random encryption (actual data)
+        
+        print("ssssssssssssssssssssssss", normalized_block_name)
+        encrypted = encrypt_dict(
+            ce,
+            dek_id,
+            {
+                "block_code": payload.block_code,
+                "block_name": payload.block_name,
+            }
+        )
+
+        campus_block.block_code = encrypted["block_code"]
+        campus_block.block_name = encrypted["block_name"]
+        campus_block.block_name_search = normalized_block_name
+       
+       
+
+    
+
+        # 8️⃣ Status update (optional)
+        
+        
+
+        campus_block.updated_at = datetime.now(timezone.utc)
+
+        await campus_block.save()
+
+        # 9️⃣ Audit
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(user.id),
+                action="UPDATE",
+                resource="campus_block",
+                resource_id=str(campus_block.id),
+                status="success",
+            )
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "campus_block_id": str(campus_block.id),
+            "updated_at": campus_block.updated_at,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("❌ Crash:", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
 
 
 
