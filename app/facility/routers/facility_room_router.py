@@ -423,95 +423,235 @@ async def get_facility_rooms(
 
 
 
-@router.put("/update/room/{room_id}/")
+@router.put("/update/{room_id}/")
 async def update_facility_room(
     room_id: str,
-    room: FacilityRoom,
+    payload: FacilityRoom,
     request: Request,
     current_user_id: str = Depends(get_current_user_id),
 ):
-    ce = getattr(request.app, "client_encryption", None)
-    if ce is None:
-        ce = init_encryption()
-        request.app.client_encryption = ce
-    dek_id = getattr(request.app, "dek_id", None)
-    if dek_id is None:
-        dek_id = ensure_data_key()
-        request.app.dek_id = dek_id
-
-    def enc_or_none(val):
-        return encrypt_value(ce, dek_id, val) if val is not None else None
-
-    user = await UserDoc.get(current_user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
     try:
-        room_obj_id = PydanticObjectId(room_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid Room ID format")
-    room_doc = await FacilityRooms.get(room_obj_id)
-    if not room_doc:
-        raise HTTPException(status_code=404, detail="Room not found")
+        # 1️⃣ User
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
 
-    update_data = room.model_dump(exclude_unset=True)
-    if not update_data:
-        raise HTTPException(status_code=400, detail="No fields provided for update")
+        # 2️⃣ Encryption init
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
 
-    current_room_id = _decrypt_value(ce, room_doc.room_id)
-    current_type = _decrypt_value(ce, room_doc.room_type)
-    current_wing = _decrypt_value(ce, room_doc.wing)
-    try:
-        current_features = _decrypt_json_field(ce, room_doc.room_features)
-    except Exception:
-        current_features = None
-    current_isolation = _decrypt_value(ce, room_doc.isolation_room)
-    current_notes = _decrypt_value(ce, room_doc.notes)
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+            request.app.dek_id = dek_id
 
-    new_room_id = room.room_id if "room_id" in update_data else current_room_id
-    new_room_type = (room.room_type.value if room.room_type else None) if "room_type" in update_data else current_type
-    new_wing = room.wing if "wing" in update_data else current_wing
+        # 3️⃣ Get Room
+        try:
+            room_obj_id = ObjectId(room_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid Room ID")
 
-    if "features" in update_data:
-        new_features_obj = room.features
-    else:
-        new_features_obj = current_features
-
-    new_isolation = room.isolation_room if "isolation_room" in update_data else current_isolation
-    new_notes = room.notes if "notes" in update_data else current_notes
-
-    room_doc.room_id = enc_or_none(new_room_id)
-    room_doc.room_type = enc_or_none(new_room_type)
-    room_doc.wing = enc_or_none(new_wing)
-    room_doc.room_features = enc_or_none(json.dumps(new_features_obj.model_dump()) if new_features_obj is not None else None)
-    room_doc.isolation_room = enc_or_none(new_isolation)
-    room_doc.notes = enc_or_none(new_notes)
-    room_doc.updated_at = datetime.now(timezone.utc)
-    await room_doc.save()
-
-    try:
-        await log_audit(
-            request=request,
-            user_id=str(user.id),
-            action="Update",
-            resource="Facility Room",
-            resource_id=str(room_doc.id),
-            status="success",
-            notes="Facility room updated successfully",
+        room = await FacilityRooms.find_one(
+            FacilityRooms.id == room_obj_id,
+            FacilityRooms.created_by.id == user.id,
+            FacilityRooms.is_deleted == False,
+            fetch_links=True
         )
-    except Exception:
-        pass
 
-    return {
-        "success": True,
-        "id": str(room_doc.id),
-        "room_id": new_room_id,
-        "room_type": new_room_type,
-        "wing": new_wing,
-        "room_features": new_features_obj.model_dump() if new_features_obj is not None else None,
-        "isolation_room": new_isolation,
-        "notes": new_notes,
-        "floor_id": str(room_doc.floor.id) if room_doc.floor else None,
-        "created_at": room_doc.created_at,
-        "updated_at": room_doc.updated_at,
-    }
+        if not room:
+            raise HTTPException(status_code=404, detail="Room not found")
+
+        # 4️⃣ Validate floor (optional)
+        if payload.floor_id:
+            try:
+                floor_obj_id = ObjectId(payload.floor_id)
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid Floor ID")
+
+            floor = await FacilityFloor.find_one(
+                FacilityFloor.id == floor_obj_id,
+                FacilityFloor.facility_id.id == room.facility_id.id,
+                FacilityFloor.is_deleted == False,
+            )
+
+            if not floor:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Floor not found in this facility"
+                )
+
+            room.floor_id = floor
+
+        # 5️⃣ Normalize & check duplicate room number
+        if payload.room_id:
+            normalized_room_no = payload.room_id.strip().lower()
+
+            duplicate = await FacilityRooms.find_one(
+                FacilityRooms.facility_id.id == room.facility_id.id,
+                FacilityRooms.room_no_search == normalized_room_no,
+                FacilityRooms.id != room.id,
+                FacilityRooms.is_deleted == False,
+            )
+            if duplicate:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Room number already exists in this facility"
+                )
+
+            room.room_no_search = normalized_room_no
+            room.room_number = encrypt_value(
+                ce, dek_id, payload.room_id
+            )
+
+        # 6️⃣ Update encrypted fields (ONLY if provided)
+        if payload.room_type:
+            room.room_type_search = payload.room_type.strip().lower()
+            room.room_type = encrypt_value(ce, dek_id, payload.room_type)
+
+        if payload.wing is not None:
+            room.wing = encrypt_value(ce, dek_id, payload.wing)
+
+        if payload.isolation_room is not None:
+            room.isolation_room = encrypt_value(
+                ce, dek_id, payload.isolation_room
+            )
+
+        if payload.notes is not None:
+            room.notes = encrypt_value(ce, dek_id, payload.notes)
+
+        if payload.features:
+            room.room_features = encrypt_value(
+                ce,
+                dek_id,
+                json.dumps(payload.features.model_dump())
+            )
+
+        # 7️⃣ Timestamp
+        room.updated_at = datetime.now(timezone.utc)
+
+        await room.save()
+
+        # 8️⃣ Audit
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(user.id),
+                action="Update",
+                resource="Facility Room",
+                resource_id=str(room.id),
+                status="success",
+                notes="Facility room updated successfully",
+            )
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "room_id": str(room.id),
+            "message": "Facility room updated successfully",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("❌ Crash:", e)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal Server Error while updating facility room"
+        )
+
+
+# @router.put("/update/room/{room_id}/")
+# async def update_facility_room(
+#     room_id: str,
+#     room: FacilityRoom,
+#     request: Request,
+#     current_user_id: str = Depends(get_current_user_id),
+# ):
+#     ce = getattr(request.app, "client_encryption", None)
+#     if ce is None:
+#         ce = init_encryption()
+#         request.app.client_encryption = ce
+#     dek_id = getattr(request.app, "dek_id", None)
+#     if dek_id is None:
+#         dek_id = ensure_data_key()
+#         request.app.dek_id = dek_id
+
+#     def enc_or_none(val):
+#         return encrypt_value(ce, dek_id, val) if val is not None else None
+
+#     user = await UserDoc.get(current_user_id)
+#     if not user:
+#         raise HTTPException(status_code=404, detail="User not found")
+    
+#     try:
+#         room_obj_id = PydanticObjectId(room_id)
+#     except Exception:
+#         raise HTTPException(status_code=400, detail="Invalid Room ID format")
+#     room_doc = await FacilityRooms.get(room_obj_id)
+#     if not room_doc:
+#         raise HTTPException(status_code=404, detail="Room not found")
+
+#     update_data = room.model_dump(exclude_unset=True)
+#     if not update_data:
+#         raise HTTPException(status_code=400, detail="No fields provided for update")
+
+#     current_room_id = _decrypt_value(ce, room_doc.room_id)
+#     current_type = _decrypt_value(ce, room_doc.room_type)
+#     current_wing = _decrypt_value(ce, room_doc.wing)
+#     try:
+#         current_features = _decrypt_json_field(ce, room_doc.room_features)
+#     except Exception:
+#         current_features = None
+#     current_isolation = _decrypt_value(ce, room_doc.isolation_room)
+#     current_notes = _decrypt_value(ce, room_doc.notes)
+
+#     new_room_id = room.room_id if "room_id" in update_data else current_room_id
+#     new_room_type = (room.room_type.value if room.room_type else None) if "room_type" in update_data else current_type
+#     new_wing = room.wing if "wing" in update_data else current_wing
+
+#     if "features" in update_data:
+#         new_features_obj = room.features
+#     else:
+#         new_features_obj = current_features
+
+#     new_isolation = room.isolation_room if "isolation_room" in update_data else current_isolation
+#     new_notes = room.notes if "notes" in update_data else current_notes
+
+#     room_doc.room_id = enc_or_none(new_room_id)
+#     room_doc.room_type = enc_or_none(new_room_type)
+#     room_doc.wing = enc_or_none(new_wing)
+#     room_doc.room_features = enc_or_none(json.dumps(new_features_obj.model_dump()) if new_features_obj is not None else None)
+#     room_doc.isolation_room = enc_or_none(new_isolation)
+#     room_doc.notes = enc_or_none(new_notes)
+#     room_doc.updated_at = datetime.now(timezone.utc)
+#     await room_doc.save()
+
+#     try:
+#         await log_audit(
+#             request=request,
+#             user_id=str(user.id),
+#             action="Update",
+#             resource="Facility Room",
+#             resource_id=str(room_doc.id),
+#             status="success",
+#             notes="Facility room updated successfully",
+#         )
+#     except Exception:
+#         pass
+
+#     return {
+#         "success": True,
+#         "id": str(room_doc.id),
+#         "room_id": new_room_id,
+#         "room_type": new_room_type,
+#         "wing": new_wing,
+#         "room_features": new_features_obj.model_dump() if new_features_obj is not None else None,
+#         "isolation_room": new_isolation,
+#         "notes": new_notes,
+#         "floor_id": str(room_doc.floor.id) if room_doc.floor else None,
+#         "created_at": room_doc.created_at,
+#         "updated_at": room_doc.updated_at,
+#     }
