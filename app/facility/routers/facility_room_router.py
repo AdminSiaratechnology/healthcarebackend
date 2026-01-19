@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from bson import ObjectId
 from fastapi import APIRouter, Request, HTTPException, Depends,Query
 from pydantic import ValidationError
-from beanie.operators import RegEx,And
+from beanie.operators import RegEx,And,Or
 from typing import Optional
 
 from app.facility.models.facility import Facility
@@ -203,8 +203,14 @@ async def get_facility_rooms(
 
         
         if search:
+            search_value = search.lower()
             conditions.append(
-                RegEx(FacilityRooms.room_no_search, f"^{search.lower()}")
+                Or(
+                     RegEx(FacilityRooms.room_no_search, f"^{search_value}"),
+                    RegEx(FacilityRooms.facility_id.facility_name_search, f"^{search_value}"),
+                    
+                )
+               
             )
 
         
@@ -250,6 +256,18 @@ async def get_facility_rooms(
                     rooms.facility_id.facility_name_search
                     if rooms.facility_id else None
                 ),
+                "wings":decrypt_value(ce,rooms.wing),
+                "floors":(
+                    rooms.floor.floor_label_search
+                    if rooms.floor else None
+                ),
+                
+                "rooms_features": (
+                    json.loads(decrypt_value(ce, rooms.room_features))
+                    if rooms.room_features else None
+                ),
+                "isolation_rooms":decrypt_value(ce,rooms.isolation_room),
+                "notes":decrypt_value(ce,rooms.notes),
                 "status": rooms.status,
                 "created_at": rooms.created_at,
                 "updated_at": rooms.updated_at,
