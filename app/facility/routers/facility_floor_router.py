@@ -18,7 +18,7 @@ from app.encryption.encryption import encrypt_value, decrypt_value, init_encrypt
 import json
 import os
 
-router = APIRouter(prefix="/facility", tags=["Facility"])
+router = APIRouter(prefix="/floors", tags=["Masters"])
 
 
 def _dec_str(client_encryption, encrypted_val):
@@ -30,7 +30,7 @@ def _dec_str(client_encryption, encrypted_val):
 
 
 from bson import ObjectId
-@router.post("/create/floor/{facility_id}/")
+@router.post("/create/{facility_id}/")
 async def create_facility_floor(
     facility_id: str,
     payload: FloorSchema,
