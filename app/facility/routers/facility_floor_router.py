@@ -19,6 +19,7 @@ import json
 import os
 from typing import Optional
 from beanie.operators import RegEx
+from beanie.operators import And
 
 router = APIRouter(prefix="/floors", tags=["Masters"])
 
@@ -449,29 +450,32 @@ async def get_all_facilities_floors(
 #     }
 
 
-@router.put("/update/floor/{floor_id}/")
+@router.put("/update/{floor_id}/")
 async def update_floor(
     floor_id: str,
-    floor: FloorSchema,
+    payload: FloorSchema,
     request: Request,
     current_user_id: str = Depends(get_current_user_id),
 ):
+    # Get user
+    user = await UserDoc.get(current_user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+
     # Encryption setup
-    client_encryption = getattr(request.app, "client_encryption", None)
-    if client_encryption is None:
+    ce = getattr(request.app, "client_encryption", None)
+
+    if ce is None:
         client_encryption = init_encryption()
-        request.app.client_encryption = client_encryption
+        request.app.client_encryption = ce
 
     dek_id = getattr(request.app, "dek_id", None)
     if dek_id is None:
         dek_id = ensure_data_key()
         request.app.dek_id = dek_id
 
-    # Get user
-    user = await UserDoc.get(current_user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
+    
     # Validate floor ID
     try:
         floor_obj_id = PydanticObjectId(floor_id)
@@ -479,23 +483,60 @@ async def update_floor(
         raise HTTPException(status_code=400, detail="Invalid Floor ID format")
 
     # Fetch floor
-    fl = await FacilityFloor.get(floor_obj_id)
-    if not fl:
+   
+    floors = await FacilityFloor.find_one(
+            FacilityFloor.id == floor_obj_id,
+            FacilityFloor.created_by.id == user.id,
+            FacilityFloor.is_deleted == False,
+        )
+    if not floors:
         raise HTTPException(status_code=404, detail="Floor Label not found")
+    
+    
+
+    # 5️⃣ Normalize name
+
+
+    normalized_floor_label = payload.floor_label.strip().lower()
+    # 6️⃣ Duplicate validation
+
+    if normalized_floor_label != floors.floor_label_search:
+
+        duplicate = await FacilityFloor.find_one(
+            And(
+                FacilityFloor.facility_id == floors.facility_id,
+                FacilityFloor.floor_label_search == normalized_floor_label,
+                FacilityFloor.is_deleted == False,
+                FacilityFloor.id != floors.id,
+            )
+        )
+        if duplicate:
+            raise HTTPException(
+                status_code=400,
+                detail="Facility Floors  with this name already exists in this facility",
+            )
 
     try:
-        # Encrypt and update
-        enc_floor_label = encrypt_value_deterministic(
-            client_encryption, dek_id, floor.floor_label
-        )
-        enc_floor_display= encrypt_value_deterministic(
-            client_encryption, dek_id, floor.display
+
+
+        
+        # 7️⃣ Encrypt & update
+        encrypted = encrypt_dict(
+            ce,
+            dek_id,
+            {
+                "floor_label": payload.floor_label,
+                "display": payload.display,
+            },
         )
 
-        fl.floor_label = enc_floor_label
-        fl.display = enc_floor_display
-        fl.updated_at = datetime.now(timezone.utc)
-        await fl.save()
+        floors.floor_label = encrypted["floor_label"]
+        floors.display = encrypted["display"]
+        floors.floor_label_search = normalized_floor_label
+        floors.updated_at = datetime.now(timezone.utc)
+
+        
+        await floors.save()
 
         # Audit log
         try:
@@ -504,7 +545,7 @@ async def update_floor(
                 user_id=str(user.id),
                 action="Update",
                 resource="Facility Floor",
-                resource_id=str(fl.id),
+                resource_id=str(floors.id),
                 status="success",
                 notes="Floor updated successfully",
             )
@@ -513,10 +554,10 @@ async def update_floor(
 
         return {
             "success": True,
-            "id": str(fl.id),
-            "floor_label": floor.floor_label,
-            "display": floor.display,
-            "updated_at": fl.updated_at,
+            "id": str(floors.id),
+            # "floor_label": floors.floor_label,
+            # "display": floors.display,
+            "updated_at": floors.updated_at,
         }
 
     except HTTPException:

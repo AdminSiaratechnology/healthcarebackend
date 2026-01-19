@@ -280,7 +280,7 @@ async def update_campus_block(
         )
         
 
-        print("campus bolock found here",campus_block)
+        
 
         if not campus_block:
             raise HTTPException(status_code=404, detail="Campus block not found")
