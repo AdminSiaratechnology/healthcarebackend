@@ -13,13 +13,13 @@ from app.facility.models.facility_floor import FacilityFloor
 class FacilityRooms(Document, AutoEncryptMixin, AutoDecryptMixin):
     # 🔗 Relations
     facility_id: Link[Facility] | None = None
+    floor_id : Link[FacilityFloor] | None = None
     created_by: Link[UserDoc] | None = None
     deleted_by: Link[UserDoc] | None = None
 
     # 🔐 Encrypted
     room_number: Binary | None = None
     room_type: Binary | None = None
-    floor : Link[FacilityFloor] | None = None
     wing : Binary | None = None
     room_features: Binary | None = None
     isolation_room: Binary | None = None

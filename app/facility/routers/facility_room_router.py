@@ -7,6 +7,7 @@ from typing import Optional
 
 from app.facility.models.facility import Facility
 from app.facility.models.facility_rooms import FacilityRooms
+from app.facility.models.facility_floor import FacilityFloor
 
 from app.accounts.models.user import UserDoc
 from app.auth.deps import get_current_user_id
@@ -58,6 +59,28 @@ async def create_facility_room(
         )
         if not facility:
             raise HTTPException(status_code=404, detail="Facility not found")
+        
+                
+        try:
+            floor_obj_id = ObjectId(payload.floor_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid Floor ID")
+        
+        floor = await FacilityFloor.find_one(
+            FacilityFloor.id == floor_obj_id,
+            FacilityFloor.facility_id.id == facility.id,   # ✅ FIX
+            FacilityFloor.is_deleted == False,
+        )
+
+        print("floorssssssss",floor)
+
+
+
+        if not floor:
+            raise HTTPException(
+                status_code=404,
+                detail="Floor not found in this facility"
+            )
 
         # 4️⃣ Normalize name (VERY IMPORTANT)
         normalized_room_no = payload.room_id.strip().lower()
@@ -105,6 +128,7 @@ async def create_facility_room(
        
 
         room_doc = FacilityRooms(
+            floor_id=floor,    
             room_no_search = normalized_room_no,
             room_type_search = normalized_room_type,
             room_number=encrypted["room_id"],
@@ -257,9 +281,9 @@ async def get_facility_rooms(
                     if rooms.facility_id else None
                 ),
                 "wings":decrypt_value(ce,rooms.wing),
-                "floors":(
-                    rooms.floor.floor_label_search
-                    if rooms.floor else None
+                "floors_name":(
+                    rooms.floor_id.floor_label_search
+                    if rooms.floor_id else None
                 ),
                 
                 "rooms_features": (

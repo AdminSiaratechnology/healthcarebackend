@@ -23,6 +23,7 @@ class RoomFeatures(BaseModel):
 
     
 class FacilityRoom(BaseModel):
+    floor_id : str
     room_id: Optional[str] = None
     room_type: Optional[RoomType] = None
     wing: Optional[str] = None
