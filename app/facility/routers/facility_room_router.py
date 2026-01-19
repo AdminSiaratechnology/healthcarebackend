@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-
+from bson import ObjectId
 from fastapi import APIRouter, Request, HTTPException, Depends,Query
 from pydantic import ValidationError
 
@@ -9,7 +9,7 @@ from app.facility.models.facility_rooms import FacilityRooms
 
 from app.accounts.models.user import UserDoc
 from app.auth.deps import get_current_user_id
-from app.encryption.encryption import encrypt_value, decrypt_value,init_encryption,ensure_data_key,encrypt_value_deterministic
+from app.encryption.encryption import encrypt_value, decrypt_value,init_encryption,ensure_data_key,encrypt_value_deterministic,encrypt_dict
 from app.utils.audit import log_audit
 from app.schemas.facilities.rooms import FacilityRoom
 from beanie import PydanticObjectId
@@ -18,51 +18,99 @@ import json
 import os
 
 
-router = APIRouter(prefix="/facility", tags=["Facility"])
+
+router = APIRouter(prefix="/rooms", tags=["Masters"])
 
 
-@router.post("/create/room/{facility_id}/")
+@router.post("/create/{facility_id}/")
 async def create_facility_room(
     facility_id: str,
-    room: FacilityRoom,
+    payload: FacilityRoom,
     request: Request,
     current_user_id: str = Depends(get_current_user_id),
     
 ):
     try:
-        client_encryption = request.app.client_encryption
-        dek_id = request.app.dek_id
-
-        def enc_or_none(val):
-            return encrypt_value(client_encryption, dek_id, val) if val is not None else None
-
-        room_id_enc = enc_or_none(room.room_id)
-        room_type_enc = enc_or_none(room.room_type.value if room.room_type else None)
-        wing_enc = enc_or_none(room.wing)
-        features_enc = enc_or_none(json.dumps(room.features.model_dump()) if room.features else None)
-        isolation_enc = enc_or_none(room.isolation_room)
-        notes_enc = enc_or_none(room.notes)
-
-        try:
-            facility_obj_id = PydanticObjectId(facility_id)
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid Facility ID format")
-
-        facility = await Facility.get(facility_obj_id)
-        if not facility:
-            raise HTTPException(status_code=404, detail="Facility not found")
-
+        # 1️⃣ User
         user = await UserDoc.get(current_user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
+        # 2️⃣ Encryption init  
+
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+       
+
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+            request.app.dek_id = dek_id
+
+         # 3️⃣ Facility ownership check
+        facility = await Facility.find_one(
+            Facility.id == ObjectId(facility_id),
+            Facility.created_by.id == user.id,
+        )
+        if not facility:
+            raise HTTPException(status_code=404, detail="Facility not found")
+
+        # 4️⃣ Normalize name (VERY IMPORTANT)
+        normalized_room_no = payload.room_id.strip().lower()
+        normalized_room_type = payload.room_type.strip().lower()
+
+        # 5️⃣Duplicate validation (ACTIVE RECORDS ONLY)
+
+        existing = await FacilityRooms.find_one(
+            FacilityRooms.facility_id.id == facility.id,
+            FacilityRooms.room_no_search == normalized_room_no,
+            FacilityRooms.is_deleted == False
+            )
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail="Room already exists in this facility"
+            )
+
+        # 6️⃣ Random encryption (actual storage)
+        encrypted = encrypt_dict(
+            ce,
+            dek_id,
+            {
+                "room_id": payload.room_id,
+                "room_type": payload.room_type,
+                "wing": payload.wing,
+                "isolation_room": payload.isolation_room,
+                "notes":payload.notes
+            }
+        )
+        
+        features_enc = None
+        if payload.features:
+            features_enc = encrypt_value(
+                ce,
+                dek_id,
+                json.dumps(payload.features.model_dump())
+            )
+        
+
+       
+
+       # 7️⃣ Save
+
+       
+
         room_doc = FacilityRooms(
-            room_id=room_id_enc,
-            room_type=room_type_enc,
-            wing=wing_enc,
+            room_no_search = normalized_room_no,
+            room_type_search = normalized_room_type,
+            room_id=encrypted["room_id"],
+            room_type=encrypted["room_type"],
+            wing=encrypted["wing"],
             room_features=features_enc,
-            isolation_room=isolation_enc,
-            notes=notes_enc,
+            isolation_room=encrypted["isolation_room"],
+            notes=encrypted["notes"],
             facility_id=facility,
             created_by=user,
             created_at=datetime.now(timezone.utc),
@@ -92,7 +140,8 @@ async def create_facility_room(
 
     except HTTPException:
         raise
-    except Exception:
+    except Exception as e:
+        print("❌ Crash:", e)
         raise HTTPException(
             status_code=500,
             detail="Internal Server Error while creating facility room"
