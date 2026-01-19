@@ -73,7 +73,7 @@ async def create_campus_block(
             ce,
             dek_id,
             {
-                "block_code": payload.block_code,
+                "department_code": payload.block_code,
                 "block_name": payload.block_name,
             }
         )
