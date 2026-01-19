@@ -9,7 +9,7 @@ from app.facility.models.facility_floor import FacilityFloor
 
 from app.accounts.models.user import UserDoc
 from app.auth.deps import get_current_user_id
-from app.encryption.encryption import encrypt_value, decrypt_value
+from app.encryption.encryption import encrypt_value, decrypt_value,encrypt_dict
 # from app.facility.routers.campusblock_router import _extract_block_values
 from app.utils.audit import log_audit
 from app.schemas.facilities.floor import FloorSchema
@@ -29,49 +29,93 @@ def _dec_str(client_encryption, encrypted_val):
 
 
 
-
+from bson import ObjectId
 @router.post("/create/floor/{facility_id}/")
 async def create_facility_floor(
     facility_id: str,
-    floor: FloorSchema,
+    payload: FloorSchema,
     request: Request,
     current_user_id: str = Depends(get_current_user_id)
 ):
     try:
-        # client_encryption = request.app.client_encryption
-        ce = getattr(request.app, "client_encryption", None)
-        if ce is None:
-            ce = init_encryption()
-        dek_id = getattr(request.app, "dek_id", None)
-        # ✅ Encrypt Body
-        if dek_id is None:
-            dek_id = ensure_data_key()
-            request.app.dek_id = dek_id
+
+        # 1️⃣ User
         user = await UserDoc.get(current_user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
        
+        # client_encryption = request.app.client_encryption
+        ce = getattr(request.app, "client_encryption", None)
 
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+
+        dek_id = getattr(request.app, "dek_id", None)
+
+        # ✅ Encrypt Body
+        if dek_id is None:
+            dek_id = ensure_data_key()
+            request.app.dek_id = dek_id
+        
         # ✅ ✅ FIXED FACILITY ID
+
+        # 3️⃣ Facility ownership check
+       
         try:
-            facility_obj_id = PydanticObjectId(facility_id)
+            facility_obj_id = ObjectId(facility_id)
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid Facility ID format")
+        
 
-        facilityid = await Facility.get(facility_obj_id)
-        if not facilityid:
+        # 3️⃣ Facility ownership check
+        facility = await Facility.find_one({
+            "_id":  ObjectId(facility_id),
+            "created_by.$id": ObjectId(user.id),
+            # "is_deleted": False
+        })
+
+        if not facility:
             raise HTTPException(status_code=404, detail="Facility not found")
+        
 
         # ✅ Check User
-        enc_floor_label_det = encrypt_value_deterministic(ce, dek_id, floor.floor_label)
-        enc_floor_dispaly_det = encrypt_value_deterministic(ce, dek_id, floor.display)
 
+        # 4️⃣ Normalize name (VERY IMPORTANT)
+        normalized_floor_label = payload.floor_label.strip().lower()
+
+        # 6️⃣ Duplicate validation (ACTIVE RECORDS ONLY)
+        existing = await FacilityFloor.find_one({
+            "facility_id.$id": facility.id,
+            "floor_label_search": normalized_floor_label,
+            # "is_deleted": False
+        })
+
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail="Floor label with this name already exists in this facility"
+            )
+
+        # 7️⃣ Random encryption (actual storage)
+        encrypted = encrypt_dict(
+            ce,
+            dek_id,
+            {
+                "floor_label": payload.floor_label,
+                "display": payload.display,
+            }
+        )
+       
         # ✅ Create Floor
         facility_floor_doc = FacilityFloor(
-            floor_label=enc_floor_label_det,
-            display=enc_floor_dispaly_det,
-            facility_id=str(facilityid.id),
+            floor_label_search = normalized_floor_label,
+            floor_label=encrypted["floor_label"],
+            display=encrypted["display"],
+            facility_id=facility,
             created_by=user,
+            status="active",
+            is_deleted=False,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
@@ -94,7 +138,7 @@ async def create_facility_floor(
 
         return {
             "success": True,
-            "facility_id_received": str(facilityid.id),
+            "facility_id_received": str(facility.id),
             "facility_floor_id": str(facility_floor_doc.id),
         }
 
