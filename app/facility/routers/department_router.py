@@ -19,7 +19,7 @@ from app.schemas.facilities.department import DepartmentSchema
 from beanie import PydanticObjectId
 from bson import ObjectId
 from typing import Optional
-from beanie.operators import Or, RegEx
+from beanie.operators import Or, RegEx,And
 import json
 import os
 
@@ -276,170 +276,223 @@ async def get_all_campus_blocks(
 
 
 
-@router.get("/get/department/{facility_id}/")
-async def get_facility_departments(
-    facility_id: str,
-    request: Request,
-    current_user_id: str = Depends(get_current_user_id),
-    page : int = Query(1, ge=1),
-    page_size : int = Query(10, ge=1),
-    search: str | None = Query(None, description="Search by code or department name"),
-):
-    # ---------------- User ----------------
-    user = await UserDoc.get(current_user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+# @router.get("/get/department/{facility_id}/")
+# async def get_facility_departments(
+#     facility_id: str,
+#     request: Request,
+#     current_user_id: str = Depends(get_current_user_id),
+#     page : int = Query(1, ge=1),
+#     page_size : int = Query(10, ge=1),
+#     search: str | None = Query(None, description="Search by code or department name"),
+# ):
+#     # ---------------- User ----------------
+#     user = await UserDoc.get(current_user_id)
+#     if not user:
+#         raise HTTPException(status_code=404, detail="User not found")
 
-    # ---------------- Facility ----------------
-    try:
-        facility_obj = await Facility.get(PydanticObjectId(facility_id))
-    except Exception:
-        facility_obj = await Facility.get(facility_id)
+#     # ---------------- Facility ----------------
+#     try:
+#         facility_obj = await Facility.get(PydanticObjectId(facility_id))
+#     except Exception:
+#         facility_obj = await Facility.get(facility_id)
 
-    if not facility_obj:
-        raise HTTPException(status_code=404, detail="Facility not found")
+#     if not facility_obj:
+#         raise HTTPException(status_code=404, detail="Facility not found")
 
-    # ---------------- Encryption ----------------
+#     # ---------------- Encryption ----------------
     
-    ce = getattr(request.app, "client_encryption", None)
-    if ce is None:
-        ce = init_encryption()
-        request.app.client_encryption = ce
+#     ce = getattr(request.app, "client_encryption", None)
+#     if ce is None:
+#         ce = init_encryption()
+#         request.app.client_encryption = ce
 
-    # ---------------- Departments (facility + created_by) ----------------
-    departments = await FacilityDepartment.find(
-        FacilityDepartment.facility_id.id == facility_obj.id,
-        FacilityDepartment.created_by.id == user.id
-    ).sort("created_at").to_list()
-    search_lower = search.lower() if search else None
+#     # ---------------- Departments (facility + created_by) ----------------
+#     departments = await FacilityDepartment.find(
+#         FacilityDepartment.facility_id.id == facility_obj.id,
+#         FacilityDepartment.created_by.id == user.id
+#     ).sort("created_at").to_list()
+#     search_lower = search.lower() if search else None
 
-    # ---------------- Response ----------------
-    result = []
-    for dep in departments:
-        code = _decrypt_value(ce, dep.code)
-        department_name = _decrypt_value(ce, dep.department_name)
-        if search_lower:
-            if (
-                search_lower not in str(code or "").lower()
-                and search_lower not in str(department_name or "").lower()
-            ):
-                continue    
+#     # ---------------- Response ----------------
+#     result = []
+#     for dep in departments:
+#         code = _decrypt_value(ce, dep.code)
+#         department_name = _decrypt_value(ce, dep.department_name)
+#         if search_lower:
+#             if (
+#                 search_lower not in str(code or "").lower()
+#                 and search_lower not in str(department_name or "").lower()
+#             ):
+#                 continue    
 
-        result.append({
-            "id": str(dep.id),
-            "code": _decrypt_value(ce, dep.code),
-            "department_name": _decrypt_value(ce, dep.department_name),
-            "type": _decrypt_value(ce, dep.type),
-            "description": _decrypt_value(ce, dep.description),
-            "created_at": dep.created_at,
-            "updated_at": dep.updated_at,
-        })
+#         result.append({
+#             "id": str(dep.id),
+#             "code": _decrypt_value(ce, dep.code),
+#             "department_name": _decrypt_value(ce, dep.department_name),
+#             "type": _decrypt_value(ce, dep.type),
+#             "description": _decrypt_value(ce, dep.description),
+#             "created_at": dep.created_at,
+#             "updated_at": dep.updated_at,
+#         })
 
-    total = len(result)
-    start = (page - 1) * page_size
-    end = start + page_size
-    paginated_docs = result[start:end]
-    # ---------------- Audit ----------------
-    try:
-        await log_audit(
-            request=request,
-            user_id=str(user.id),
-            action="Read",
-            resource="Facility Department",
-            resource_id=str(facility_obj.id),
-            status="success",
-            notes="Facility departments fetched successfully",
-        )
-    except Exception:
-        pass
+#     total = len(result)
+#     start = (page - 1) * page_size
+#     end = start + page_size
+#     paginated_docs = result[start:end]
+#     # ---------------- Audit ----------------
+#     try:
+#         await log_audit(
+#             request=request,
+#             user_id=str(user.id),
+#             action="Read",
+#             resource="Facility Department",
+#             resource_id=str(facility_obj.id),
+#             status="success",
+#             notes="Facility departments fetched successfully",
+#         )
+#     except Exception:
+#         pass
 
     
-    return {
-        "items": paginated_docs,
-        "pagination" : {
-            "page": page,
-            "page_size": page_size,
-            "total_items": total,
-            "total_pages": (total + page_size - 1) // page_size,
-        }
-    }
+#     return {
+#         "items": paginated_docs,
+#         "pagination" : {
+#             "page": page,
+#             "page_size": page_size,
+#             "total_items": total,
+#             "total_pages": (total + page_size - 1) // page_size,
+#         }
+#     }
 
 
-@router.put("/update/department/{department_id}/")
-async def update_facility_department(
+
+
+@router.put("/update/{department_id}/")
+async def update_campus_block(
     department_id: str,
-    department: DepartmentSchema,
+    payload: DepartmentSchema,
     request: Request,
     current_user_id: str = Depends(get_current_user_id),
 ):
-    ce = getattr(request.app, "client_encryption", None)
-    if ce is None:
-        ce = init_encryption()
+    try:
+        # 1️⃣ User
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # 2️⃣ Encryption
+        ce = getattr(request.app, "client_encryption", None) or init_encryption()
         request.app.client_encryption = ce
-    dek_id = getattr(request.app, "dek_id", None)
-    if dek_id is None:
-        dek_id = ensure_data_key()
+
+        dek_id = getattr(request.app, "dek_id", None) or ensure_data_key()
         request.app.dek_id = dek_id
 
-    def enc_det_or_none(val):
-        return encrypt_value_deterministic(ce, dek_id, val) if val is not None else None
+        # 3️⃣ Validate ID
+        try:
+            dept_obj_id = PydanticObjectId(department_id)
+            
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid Campus Block ID")
 
-    user = await UserDoc.get(current_user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    try:
-        dept_obj_id = PydanticObjectId(department_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid Department ID format")
-
-    dept_doc = await FacilityDepartment.get(dept_obj_id)
-    if not dept_doc:
-        raise HTTPException(status_code=404, detail="Department not found")
-
-    current_code = _decrypt_value(ce, dept_doc.code)
-    current_name = _decrypt_value(ce, dept_doc.department_name)
-    current_type = _decrypt_value(ce, dept_doc.type)
-    current_desc = _decrypt_value(ce, dept_doc.description)
-
-    new_code = department.code if department.code is not None else current_code
-    new_name = department.name if department.name is not None else current_name
-    new_type = (department.type.value if department.type else None) if department.type is not None else current_type
-    new_desc = department.description if department.description is not None else current_desc
-
-    if new_code is None and new_name is None and new_type is None and new_desc is None:
-        raise HTTPException(status_code=400, detail="No fields provided for update")
-
-    dept_doc.code = enc_det_or_none(new_code)
-    dept_doc.department_name = enc_det_or_none(new_name)
-    dept_doc.type = enc_det_or_none(new_type)
-    dept_doc.description = enc_det_or_none(new_desc)
-    dept_doc.updated_at = datetime.now(timezone.utc)
-    await dept_doc.save()
-
-    try:
-        await log_audit(
-            request=request,
-            user_id=str(user.id),
-            action="Update",
-            resource="Facility Department",
-            resource_id=str(dept_doc.id),
-            status="success",
-            notes="Facility department updated successfully",
+        # 4️⃣ Fetch block (Beanie-correct)
+       
+        fac_dept = await FacilityDepartment.find_one(
+            FacilityDepartment.id == dept_obj_id,
+            FacilityDepartment.created_by.id == user.id,
+            FacilityDepartment.is_deleted == False,
         )
-    except Exception:
-        pass
+        
 
-    return {
-        "success": True,
-        "id": str(dept_doc.id),
-        "code": new_code,
-        "department_name": new_name,
-        "type": new_type,
-        "description": new_desc,
-        "updated_at": dept_doc.updated_at,
-    }
+        
+
+        if not fac_dept:
+            raise HTTPException(status_code=404, detail="Campus block not found")
+
+        # 5️⃣ Normalize name
+        normalized_name = payload.code.strip().lower()
+        normalized_code = payload.code.strip().lower()
+        normalized_type = payload.code.strip().lower()
+
+        # 6️⃣ Duplicate validation
+        if normalized_name != FacilityDepartment.department_search:
+            duplicate = await FacilityDepartment.find_one(
+                And(
+                    FacilityDepartment.facility_id == fac_dept.facility_id,
+                    FacilityDepartment.department_search == normalized_name,
+                    FacilityDepartment.is_deleted == False,
+                    FacilityDepartment.id != fac_dept.id,
+                    Or(
+                        FacilityDepartment.department_search == normalized_name,
+                        FacilityDepartment.code_search == normalized_code,
+                    )
+                )
+            )
+
+            if duplicate:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Department with this name or code already exists in this facility",
+                )
+
+        # 7️⃣ Encrypt & update
+        encrypted = encrypt_dict(
+            ce,
+            dek_id,
+            {
+                "department_code": payload.code,
+                "department_name": payload.name,
+                "department_type": payload.type,
+                "department_desc": payload.description,
+            }
+        )
+
+        fac_dept.code = encrypted["department_code"]
+        fac_dept.department_name = encrypted["department_name"]
+        fac_dept.type = encrypted["department_type"]
+        fac_dept.description = encrypted["department_desc"]
+        fac_dept.code_search = normalized_code
+        fac_dept.department_search = normalized_name
+        fac_dept.type_search = normalized_type
+        fac_dept.updated_at = datetime.now(timezone.utc)
+
+        await fac_dept.save()
+
+        # Audit log
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(user.id),
+                action="Update",
+                resource="Facility Department",
+                resource_id=str(fac_dept.id),
+                status="success",
+                notes="Department updated successfully",
+            )
+        except Exception:
+            pass
 
 
+        return {
+            "success": True,
+            "campus_block_id": str(fac_dept.id),
+            "updated_at": fac_dept.updated_at,
+        }
 
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("❌ Crash:", e)
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="Facility Department",
+                resource_id=str(department_id),
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 

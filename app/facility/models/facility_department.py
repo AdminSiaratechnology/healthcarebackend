@@ -40,3 +40,8 @@ class FacilityDepartment(Document, AutoEncryptMixin, AutoDecryptMixin):
 
     class Settings:
         name = "facility_departments"
+        indexes = [
+            [("facility_id.$id", 1), ("department_search", 1)],
+            [("is_deleted", 1), ("facility_id.$id", 1)],
+            
+        ]

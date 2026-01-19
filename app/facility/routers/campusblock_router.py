@@ -322,6 +322,20 @@ async def update_campus_block(
 
         await campus_block.save()
 
+        # Audit log
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(user.id),
+                action="Update",
+                resource="Campus Block",
+                resource_id=str(campus_block.id),
+                status="success",
+                notes="Floor updated successfully",
+            )
+        except Exception:
+            pass
+
         return {
             "success": True,
             "campus_block_id": str(campus_block.id),
@@ -332,5 +346,17 @@ async def update_campus_block(
         raise
     except Exception as e:
         print("❌ Crash:", e)
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="Facility Floor",
+                resource_id=str(block_id),
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
