@@ -11,6 +11,8 @@ from app.utils.audit import log_audit
 from bson import ObjectId
 from typing import Annotated, Optional
 from beanie import PydanticObjectId
+from beanie.operators import RegEx
+from beanie.operators import And
 
 router = APIRouter(prefix="/campusblock", tags=["Masters"])
 
@@ -219,15 +221,126 @@ async def create_campus_block(
 
 
 
+# @router.get("/list/")
+# async def get_all_campus_blocks(
+#     request: Request,
+#     current_user_id: str = Depends(get_current_user_id),
+#      # 🔹 pagination
+#     page: int = Query(1, ge=1),
+#     page_size: int = Query(10, ge=1, le=100),
+
+#     # 🔹 filters
+#     search: Optional[str] = Query(None),
+#     status: Optional[str] = Query(None),
+# ):
+#     try:
+#         # 1️⃣ User
+#         user = await UserDoc.get(current_user_id)
+#         if not user:
+#             raise HTTPException(status_code=404, detail="User not found")
+
+#         # 2️⃣ Encryption init
+#         ce = getattr(request.app, "client_encryption", None)
+#         if ce is None:
+#             ce = init_encryption()
+#             request.app.client_encryption = ce
+
+#         # ----------------------------
+#         # 3️⃣ Base query (user scope)
+#         # ----------------------------
+#         base_query = {
+#             "created_by.$id": ObjectId(user.id)
+#         }
+
+#         # ----------------------------
+#         # 4️⃣ Build filtered query
+#         # ----------------------------
+#         query = base_query.copy()
+
+#         if status:
+#             query["status"] = status.lower()
+        
+#         if search:
+#             query["block_name_search"] = {
+#                 "$regex": f"^{search.lower()}"
+#             }
+
+#         # ----------------------------
+#         # 5️⃣ Pagination
+#         # ----------------------------
+#         skip = (page - 1) * page_size
+
+#         # 3️⃣ Fetch all campus blocks created by this user
+#         # campus_blocks = await CampusBlock.find({
+#         #     "created_by.$id": user.id,
+#         #     "is_deleted": False,
+#         # }).to_list()
+
+
+#         campus_blocks = await (
+#             CampusBlock.find(
+#                 query,
+#                 fetch_links=True  # ✅ IMPORTANT
+#             )
+#             .sort("-created_at")
+#             .skip(skip)
+#             .limit(page_size)
+#             .to_list()
+#         )
+        
+#         # 4️⃣ Decrypt response
+#         result = []
+#         for block in campus_blocks:
+            
+#             # if block.facility_id:
+#             #    ss =  await block.fetch_link("facility_id")
+#             #    print("sssssssssss",ss)
+            
+
+#             result.append({
+#                 "id": str(block.id),
+#                 "block_name":  decrypt_value(ce, block.block_name),
+#                 "block_code": decrypt_value(ce,block.block_code),
+#                 "facility_id": str(block.facility_id.ref.id) if block.facility_id else None,
+#                 # "facility_namesss": block.facility_id.facility_name_search if block.facility_id else None,
+#                 'facility_name': "Main Hospital",
+                
+#                 # "facility_name": (
+#                 #     block.facility_id
+#                 #     if block.facility_id
+#                 #     else None
+#                 # ),
+#                 "status": block.status,
+#                 "created_at": block.created_at,
+#                 "updated_at": block.updated_at,
+#             })
+#         total = len(result)
+
+#         return {
+#             "success": True,
+#             "page": page,
+#             "page_size": page_size,
+#             "total_pages": ((total + page_size - 1) // page_size),
+#             "count": len(result),
+#             "data": result,
+#         }
+
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         print("❌ Crash:", e)
+#         raise HTTPException(status_code=500, detail="Internal Server Error")
+
+from beanie.operators import RegEx
+
 @router.get("/list/")
 async def get_all_campus_blocks(
     request: Request,
     current_user_id: str = Depends(get_current_user_id),
-     # 🔹 pagination
+
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
 
-    # 🔹 filters
     search: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
 ):
@@ -237,85 +350,79 @@ async def get_all_campus_blocks(
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        # 2️⃣ Encryption init
+        # 2️⃣ Encryption
         ce = getattr(request.app, "client_encryption", None)
         if ce is None:
             ce = init_encryption()
             request.app.client_encryption = ce
 
         # ----------------------------
-        # 3️⃣ Base query (user scope)
+        # 3️⃣ Query conditions (Beanie style)
         # ----------------------------
-        base_query = {
-            "created_by.$id": ObjectId(user.id)
-        }
-
-        # ----------------------------
-        # 4️⃣ Build filtered query
-        # ----------------------------
-        query = base_query.copy()
+        conditions = [
+            CampusBlock.created_by.id == user.id,
+            CampusBlock.is_deleted == False
+        ]
 
         if status:
-            query["status"] = status.lower()
+            conditions.append(CampusBlock.status == status.lower())
+
         
         if search:
-            query["block_name_search"] = {
-                "$regex": f"^{search.lower()}"
-            }
+            conditions.append(
+                RegEx(CampusBlock.block_name_search, f"^{search.lower()}")
+            )
 
         # ----------------------------
-        # 5️⃣ Pagination
+        # 4️⃣ Pagination
         # ----------------------------
         skip = (page - 1) * page_size
 
-        # 3️⃣ Fetch all campus blocks created by this user
-        # campus_blocks = await CampusBlock.find({
-        #     "created_by.$id": user.id,
-        #     "is_deleted": False,
-        # }).to_list()
-
-
-        campus_blocks = (
-            await CampusBlock.find(query)
+        # ----------------------------
+        # 5️⃣ Fetch data
+        # ----------------------------
+        campus_blocks = await (
+            CampusBlock.find(
+                *conditions,
+                fetch_links=True
+            )
             .sort("-created_at")
             .skip(skip)
             .limit(page_size)
             .to_list()
         )
-        
-        # 4️⃣ Decrypt response
+
+        # ----------------------------
+        # 6️⃣ Total count (IMPORTANT)
+        # ----------------------------
+        total = await CampusBlock.find(*conditions).count()
+
+        # ----------------------------
+        # 7️⃣ Response
+        # ----------------------------
         result = []
         for block in campus_blocks:
-           
-            # if block.facility_id:
-            #    ss =  await block.fetch_link("facility_id")
-            #    print("sssssssssss",ss)
-            
-
             result.append({
                 "id": str(block.id),
-                "block_name":  decrypt_value(ce, block.block_name),
-                "block_code": decrypt_value(ce,block.block_code),
-                "facility_id": str(block.facility_id.ref.id) if block.facility_id else None,
-                'facility_name': "Main Hospital",
-                
-                # "facility_name": (
-                #     block.facility_id
-                #     if block.facility_id
-                #     else None
-                # ),
+                "block_name": decrypt_value(ce, block.block_name),
+                "block_code": decrypt_value(ce, block.block_code),
+                "facility_id": str(block.facility_id.id) if block.facility_id else None,
+                "facility_name": (
+                    block.facility_id.facility_name_search
+                    if block.facility_id else None
+                ),
                 "status": block.status,
                 "created_at": block.created_at,
                 "updated_at": block.updated_at,
             })
-        total = len(result)
 
         return {
             "success": True,
             "page": page,
             "page_size": page_size,
-            "total_pages": ((total + page_size - 1) // page_size),
+            "total_pages": (total + page_size - 1) // page_size,
             "count": len(result),
+            "total": total,
             "data": result,
         }
 
@@ -326,108 +433,278 @@ async def get_all_campus_blocks(
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
-@router.get("/get/campusblock/{facility_id}/")
-async def get_campus_blocks(
-    facility_id: str,
-    request : Request,
-    current_user_id: str = Depends(get_current_user_id),
+# @router.get("/tessssssss")
+# async def testing(
+#     current_user_id: str = Depends(get_current_user_id),
+#     page: int = Query(1, ge=1),
+#     page_size: int = Query(10, ge=1, le=100),
+#     search: Optional[str] = Query(None),
+#     status: Optional[str] = Query(None),
+# ):
+#     # 1️⃣ Fetch user
+#     user = await UserDoc.get(current_user_id)
+#     if not user:
+#         raise HTTPException(status_code=404, detail="User not found")
 
-    # 🔹 pagination
-    page: int = Query(1, ge=1),
-    page_size: int = Query(10, ge=1, le=100),
+#     # 2️⃣ Build filters
+#     filters = [
+#         CampusBlock.created_by.id == user.id,
+#         CampusBlock.is_deleted == False
+#     ]
+#     if status:
+#         filters.append(CampusBlock.status == status)
+#     if search:
+#         filters.append(CampusBlock.block_name_search.match(search))  # regex-like search
 
-    # 🔹 filters
-    search: str | None = Query(None, description="Search by block code or block name"),
+#     # 3️⃣ Fetch cursor with links
+#     cursor = CampusBlock.find(
+#         *filters,
+#         fetch_links=True
+#     ).sort(-CampusBlock.created_at)
+
+#     # 4️⃣ Pagination
+#     campus_blocks = await cursor.to_list(page_size)
+
+#     for block in campus_blocks:
+#         if block.facility_id:  # Link field
+#             print(f"CampusBlock: {block.block_name_search} → Facility Name: {block.facility_id.facility_name_search}")
+#         else:
+#             print(f"CampusBlock: {block.block_name_search} → Facility not linked")
+
+#      # 4️⃣ Return as response
+#     return {
+#         "campus_blocks": [
+#             {
+#                 "block_name": block.block_name_search,
+#                 "facility_name": block.facility_id.facility_name_search if block.facility_id else None
+#             }
+#             for block in campus_blocks
+#         ]
+#     }
+
+# @router.get("/get/campusblock/{facility_id}/")
+# async def get_campus_blocks(
+#     facility_id: str,
+#     request : Request,
+#     current_user_id: str = Depends(get_current_user_id),
+
+#     # 🔹 pagination
+#     page: int = Query(1, ge=1),
+#     page_size: int = Query(10, ge=1, le=100),
+
+#     # 🔹 filters
+#     search: str | None = Query(None, description="Search by block code or block name"),
 
 
-):
-    try:
-        # ----------------------------
-        # 1️⃣ Fetch current user
-        # ----------------------------
-        user = await UserDoc.get(current_user_id)
-        if not user:
-            raise HTTPException(status_code=404, detail="User not found")
+# ):
+#     try:
+#         # ----------------------------
+#         # 1️⃣ Fetch current user
+#         # ----------------------------
+#         user = await UserDoc.get(current_user_id)
+#         if not user:
+#             raise HTTPException(status_code=404, detail="User not found")
         
         
 
-        # ----------------------------
-        # 2️⃣ Encryption
-        # ----------------------------
-        ce = getattr(request.app, "client_encryption", None)
-        if ce is None:
-            ce = init_encryption()
-            request.app.client_encryption = ce
+#         # ----------------------------
+#         # 2️⃣ Encryption
+#         # ----------------------------
+#         ce = getattr(request.app, "client_encryption", None)
+#         if ce is None:
+#             ce = init_encryption()
+#             request.app.client_encryption = ce
 
         
-        # ✅ ✅ FIXED FACILITY ID
-        try:
-            facility_obj_id = ObjectId(facility_id)
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid Facility ID format")
+#         # ✅ ✅ FIXED FACILITY ID
+#         try:
+#             facility_obj_id = ObjectId(facility_id)
+#         except Exception:
+#             raise HTTPException(status_code=400, detail="Invalid Facility ID format")
 
-        facilityid = await Facility.get(facility_obj_id)
-        if not facilityid:
-            raise HTTPException(status_code=404, detail="Facility not found")
+#         facilityid = await Facility.get(facility_obj_id)
+#         if not facilityid:
+#             raise HTTPException(status_code=404, detail="Facility not found")
 
-        # ----------------------------
-        # 3️⃣ Base query (user scope)
-        # ----------------------------
-        base_query = {
-            "created_by.$id": ObjectId(user.id)
-        }
+#         # ----------------------------
+#         # 3️⃣ Base query (user scope)
+#         # ----------------------------
+#         base_query = {
+#             "created_by.$id": ObjectId(user.id)
+#         }
 
-        # ----------------------------
-        # 4️⃣ Build filtered query
-        # ----------------------------
-        query = base_query.copy()
+#         # ----------------------------
+#         # 4️⃣ Build filtered query
+#         # ----------------------------
+#         query = base_query.copy()
 
-        if search:
-            enc_name = encrypt_value_deterministic(
-                ce,
-                request.app.dek_id,
-                search
-            )
-            query["block_name_det"] = enc_name
-        # ----------------------------
-        # 5️⃣ Pagination
-        # ----------------------------
-        skip = (page - 1) * page_size
+#         if search:
+#             enc_name = encrypt_value_deterministic(
+#                 ce,
+#                 request.app.dek_id,
+#                 search
+#             )
+#             query["block_name_det"] = enc_name
+#         # ----------------------------
+#         # 5️⃣ Pagination
+#         # ----------------------------
+#         skip = (page - 1) * page_size
 
-        campus_block = (
-            await CampusBlock.find(query)
-            .sort("-created_at")
-            .skip(skip)
-            .limit(page_size)
-            .to_list()
-        )
+#         campus_block = (
+#             await CampusBlock.find(query)
+#             .sort("-created_at")
+#             .skip(skip)
+#             .limit(page_size)
+#             .to_list()
+#         )
 
-        # ----------------------------
-        # 7️⃣ Decrypt response
-        # ----------------------------
-        result = []
+#         # ----------------------------
+#         # 7️⃣ Decrypt response
+#         # ----------------------------
+#         result = []
         
-        for cb in campus_block:
+#         for cb in campus_block:
            
-            result.append({
-                "id": str(cb.id),
-                "block_name": decrypt_value(ce, cb.block_name),
-                "block_code": decrypt_value(ce, cb.block_code),
-                "created_at": cb.created_at,
-                "updated_at": cb.updated_at
-            })
-         # ----------------------------
-        # 8️⃣ Final response
-        # ----------------------------
-        return {
-            "page": page,
-            "page_size": page_size,
-            "count": len(result),
-            "data": result,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+#             result.append({
+#                 "id": str(cb.id),
+#                 "block_name": decrypt_value(ce, cb.block_name),
+#                 "block_code": decrypt_value(ce, cb.block_code),
+#                 "created_at": cb.created_at,
+#                 "updated_at": cb.updated_at
+#             })
+#          # ----------------------------
+#         # 8️⃣ Final response
+#         # ----------------------------
+#         return {
+#             "page": page,
+#             "page_size": page_size,
+#             "count": len(result),
+#             "data": result,
+#         }
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
 
+
+
+
+# @router.put("/update/campusblock/{block_id}/")
+# async def update_campus_block(
+#     block_id: str,
+#     payload: CampusBlockSchema,
+#     request: Request,
+#     current_user_id: str = Depends(get_current_user_id),
+# ):
+#     try:
+#         # 1️⃣ User
+#         user = await UserDoc.get(current_user_id)
+#         if not user:
+#             raise HTTPException(status_code=404, detail="User not found")
+
+#         # 2️⃣ Encryption
+#         ce = getattr(request.app, "client_encryption", None)
+#         if ce is None:
+#             ce = init_encryption()
+#             request.app.client_encryption = ce
+
+#         dek_id = getattr(request.app, "dek_id", None)
+#         if dek_id is None:
+#             dek_id = ensure_data_key()
+#             request.app.dek_id = dek_id
+
+#         # 3️⃣ Validate block id
+#         try:
+#             block_obj_id = PydanticObjectId(block_id)
+#         except Exception:
+#             raise HTTPException(status_code=400, detail="Invalid Campus Block ID")
+
+#         # 4️⃣ Fetch campus block (ACTIVE only)
+#         campus_block = await CampusBlock.find_one({
+            
+#             "created_by.$id": ObjectId(user.id),
+#             "is_deleted": False
+#         })
+
+#         if not campus_block:
+#             raise HTTPException(status_code=404, detail="Campus block not found")
+
+#         # 5️⃣ Normalize name
+#         normalized_block_name = payload.block_name.strip().lower()
+
+#         # 6️⃣ If name changed → duplicate check
+
+        
+
+
+#         # if normalized_block_name != campus_block.block_name_search:
+#         #     duplicate = await CampusBlock.find_one({
+#         #         "facility_id.$id": campus_block.facility_id.id,
+#         #         "block_name_search": normalized_block_name,
+#         #         "is_deleted": False,
+#         #         "_id": {"$ne": campus_block.id}
+#         #     })
+
+#         #     if duplicate:
+#         #         raise HTTPException(
+#         #             status_code=400,
+#         #             detail="Campus block with this name already exists in this facility"
+#         #         )
+
+#             # ✅ Update deterministic + search
+            
+#             # campus_block.block_name_search = normalized_block_name
+
+#         # 7️⃣ Random encryption (actual data)
+        
+#         print("ssssssssssssssssssssssss", normalized_block_name)
+#         encrypted = encrypt_dict(
+#             ce,
+#             dek_id,
+#             {
+#                 "block_code": payload.block_code,
+#                 "block_name": payload.block_name,
+#             }
+#         )
+
+#         campus_block.block_code = encrypted["block_code"]
+#         campus_block.block_name = encrypted["block_name"]
+#         campus_block.block_name_search = normalized_block_name
+       
+       
+
+    
+
+#         # 8️⃣ Status update (optional)
+        
+        
+
+#         campus_block.updated_at = datetime.now(timezone.utc)
+
+#         await campus_block.save()
+
+#         # 9️⃣ Audit
+#         try:
+#             await log_audit(
+#                 request=request,
+#                 user_id=str(user.id),
+#                 action="UPDATE",
+#                 resource="campus_block",
+#                 resource_id=str(campus_block.id),
+#                 status="success",
+#             )
+#         except Exception:
+#             pass
+
+#         return {
+#             "success": True,
+#             "campus_block_id": str(campus_block.id),
+#             "updated_at": campus_block.updated_at,
+#         }
+
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         print("❌ Crash:", e)
+#         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
 
@@ -445,28 +722,28 @@ async def update_campus_block(
             raise HTTPException(status_code=404, detail="User not found")
 
         # 2️⃣ Encryption
-        ce = getattr(request.app, "client_encryption", None)
-        if ce is None:
-            ce = init_encryption()
-            request.app.client_encryption = ce
+        ce = getattr(request.app, "client_encryption", None) or init_encryption()
+        request.app.client_encryption = ce
 
-        dek_id = getattr(request.app, "dek_id", None)
-        if dek_id is None:
-            dek_id = ensure_data_key()
-            request.app.dek_id = dek_id
+        dek_id = getattr(request.app, "dek_id", None) or ensure_data_key()
+        request.app.dek_id = dek_id
 
-        # 3️⃣ Validate block id
+        # 3️⃣ Validate ID
         try:
             block_obj_id = PydanticObjectId(block_id)
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid Campus Block ID")
 
-        # 4️⃣ Fetch campus block (ACTIVE only)
-        campus_block = await CampusBlock.find_one({
-            
-            "created_by.$id": ObjectId(user.id),
-            "is_deleted": False
-        })
+        # 4️⃣ Fetch block (Beanie-correct)
+        campus_block = await CampusBlock.find_one(
+            And(
+                CampusBlock.id == block_obj_id,
+                CampusBlock.created_by == user.id,
+                # CampusBlock.is_deleted == False,
+            )
+        )
+
+        print("campus bolock found here",campus_block)
 
         if not campus_block:
             raise HTTPException(status_code=404, detail="Campus block not found")
@@ -474,69 +751,39 @@ async def update_campus_block(
         # 5️⃣ Normalize name
         normalized_block_name = payload.block_name.strip().lower()
 
-        # 6️⃣ If name changed → duplicate check
+        # 6️⃣ Duplicate validation
+        if normalized_block_name != campus_block.block_name_search:
+            duplicate = await CampusBlock.find_one(
+                And(
+                    CampusBlock.facility_id == campus_block.facility_id,
+                    CampusBlock.block_name_search == normalized_block_name,
+                    CampusBlock.is_deleted == False,
+                    CampusBlock.id != campus_block.id,
+                )
+            )
 
-        
+            if duplicate:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Campus block with this name already exists in this facility",
+                )
 
-
-        # if normalized_block_name != campus_block.block_name_search:
-        #     duplicate = await CampusBlock.find_one({
-        #         "facility_id.$id": campus_block.facility_id.id,
-        #         "block_name_search": normalized_block_name,
-        #         "is_deleted": False,
-        #         "_id": {"$ne": campus_block.id}
-        #     })
-
-        #     if duplicate:
-        #         raise HTTPException(
-        #             status_code=400,
-        #             detail="Campus block with this name already exists in this facility"
-        #         )
-
-            # ✅ Update deterministic + search
-            
-            # campus_block.block_name_search = normalized_block_name
-
-        # 7️⃣ Random encryption (actual data)
-        
-        print("ssssssssssssssssssssssss", normalized_block_name)
+        # 7️⃣ Encrypt & update
         encrypted = encrypt_dict(
             ce,
             dek_id,
             {
                 "block_code": payload.block_code,
                 "block_name": payload.block_name,
-            }
+            },
         )
 
         campus_block.block_code = encrypted["block_code"]
         campus_block.block_name = encrypted["block_name"]
         campus_block.block_name_search = normalized_block_name
-       
-       
-
-    
-
-        # 8️⃣ Status update (optional)
-        
-        
-
         campus_block.updated_at = datetime.now(timezone.utc)
 
         await campus_block.save()
-
-        # 9️⃣ Audit
-        try:
-            await log_audit(
-                request=request,
-                user_id=str(user.id),
-                action="UPDATE",
-                resource="campus_block",
-                resource_id=str(campus_block.id),
-                status="success",
-            )
-        except Exception:
-            pass
 
         return {
             "success": True,
@@ -549,8 +796,6 @@ async def update_campus_block(
     except Exception as e:
         print("❌ Crash:", e)
         raise HTTPException(status_code=500, detail="Internal Server Error")
-
-
 
 
 # @router.put("/update/campusblock/{campus_block_id}/")
