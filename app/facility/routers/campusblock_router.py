@@ -17,9 +17,6 @@ from beanie.operators import And
 
 router = APIRouter(prefix="/campusblock", tags=["Masters"])
 
-
-
-
 @router.post("/create/{facility_id}/")
 async def create_campus_block(
     facility_id: str,
@@ -206,6 +203,25 @@ async def get_all_campus_blocks(
                 "created_at": block.created_at,
                 "updated_at": block.updated_at,
             })
+
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(user.id),
+                action="Read",
+                resource="Facility Campus Block",
+                resource_id="LIST",
+                status="success",
+                notes=(
+                    f"Campus blocks fetched | "
+                    f"page={page}, page_size={page_size}, "
+                    f"search={search}, status={status}, "
+                    f"returned={len(result)}"
+                ),
+            )
+        except Exception:
+            pass
+
 
         return {
             "success": True,

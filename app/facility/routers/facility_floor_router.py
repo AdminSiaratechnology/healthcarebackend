@@ -17,6 +17,8 @@ from beanie import PydanticObjectId
 from app.encryption.encryption import encrypt_value, decrypt_value, init_encryption, ensure_data_key, encrypt_value_deterministic
 import json
 import os
+from typing import Optional
+from beanie.operators import RegEx
 
 router = APIRouter(prefix="/floors", tags=["Masters"])
 
@@ -30,6 +32,7 @@ def _dec_str(client_encryption, encrypted_val):
 
 
 from bson import ObjectId
+
 @router.post("/create/{facility_id}/")
 async def create_facility_floor(
     facility_id: str,
@@ -140,6 +143,7 @@ async def create_facility_floor(
             "success": True,
             "facility_id_received": str(facility.id),
             "facility_floor_id": str(facility_floor_doc.id),
+            
         }
 
     except HTTPException:
@@ -153,90 +157,296 @@ async def create_facility_floor(
         )
 
 
-@router.get("/get/floor/{facility_id}/")
-async def get_facility_floors(
-    facility_id: str,
+# @router.get('/list/')
+# async def get_all_facilities_floors(
+#     request : Request,
+#     current_user_id: str = Depends(get_current_user_id),
+#     page: int = Query(1, ge=1),
+#     page_size: int = Query(10, ge=1, le=100),
+
+#     search: Optional[str] = Query(None),
+#     status: Optional[str] = Query(None),
+# ):
+#     try:
+#         # 1️⃣ User
+#         user = await UserDoc.get(current_user_id)
+#         if not user:
+#             raise HTTPException(status_code=404, detail="User not found")
+
+#         # 2️⃣ Encryption
+#         ce = getattr(request.app, "client_encryption", None)
+#         if ce is None:
+#             ce = init_encryption()
+#             request.app.client_encryption = ce
+
+#         # ----------------------------
+#         # 3️⃣ Query conditions (Beanie style)
+#         # ----------------------------
+#         conditions = [
+#             FacilityFloor.created_by.id == user.id,
+#             FacilityFloor.is_deleted == False,
+#         ]
+
+#         if status:
+#             conditions.append(FacilityFloor.status == status.lower())
+
+        
+#         if search:
+#             conditions.append(
+#                 RegEx(FacilityFloor.floor_label_search, search.lower())
+#             )
+
+#         # ----------------------------
+#         # 4️⃣ Pagination
+#         # ----------------------------
+#         skip = (page - 1) * page_size
+
+#         # ----------------------------
+#         # 5️⃣ Fetch data
+#         # ----------------------------
+#         facility_floors = await (
+#             FacilityFloor.find(
+#                 *conditions,
+#                 fetch_links=True
+#             )
+#             .sort("-created_at")
+#             .skip(skip)
+#             .limit(page_size)
+#             .to_list()
+#         )
+
+#         print("facilitiessss florrr hereeeeeeeeeeee",facility_floors)
+
+#         # ----------------------------
+#         # 6️⃣ Total count (IMPORTANT)
+#         # ----------------------------
+#         total = await FacilityFloor.find(*conditions).count()
+
+#         # ----------------------------
+#         # 7️⃣ Response
+#         # ----------------------------
+#         result = []
+#         for floor in facility_floors:
+#             result.append({
+#                 "id": str(floor.id),
+#                 "floor_label": decrypt_value(ce, floor.floor_label),
+#                 "floor_display": decrypt_value(ce, floor.display),
+#                 "facility_id": str(floor.facility_id.id) if floor.facility_id else None,
+#                 "facility_name": (
+#                     floor.facility_id.facility_name_search
+#                     if floor.facility_id else None
+#                 ),
+#                 "status": floor.status,
+#                 "created_at": floor.created_at,
+#                 "updated_at": floor.updated_at,
+#             })
+
+#         try:
+#             await log_audit(
+#                 request=request,
+#                 user_id=str(user.id),
+#                 action="Read",
+#                 resource="Facility Floors",
+#                 resource_id="LIST",
+#                 status="success",
+#                 notes=(
+#                     f"Facility Floors fetched | "
+#                     f"page={page}, page_size={page_size}, "
+#                     f"search={search}, status={status}, "
+#                     f"returned={len(result)}"
+#                 ),
+#             )
+#         except Exception:
+#             pass
+#         return {
+#             "success": True,
+#             "page": page,
+#             "page_size": page_size,
+#             "total_pages": (total + page_size - 1) // page_size,
+#             "count": len(result),
+#             "total": total,
+#             "data": result,
+#         }
+
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         print("❌ Crash:", e)
+#         raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+
+
+@router.get("/list/")
+async def get_all_facilities_floors(
     request: Request,
     current_user_id: str = Depends(get_current_user_id),
     page: int = Query(1, ge=1),
-    page_size: int = Query(10, ge=1),
-    search: str | None = Query(None, description="Search by floor label or display"),
+    page_size: int = Query(10, ge=1, le=100),
+    search: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
 ):
-    ce = getattr(request.app, "client_encryption", None)
-    if ce is None:
-        ce = init_encryption()
-        request.app.client_encryption = ce
-    user = await UserDoc.get(current_user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    facility_obj = None
     try:
-        facility_obj_id = PydanticObjectId(facility_id)
-        facility_obj = await Facility.get(facility_obj_id)
-    except Exception:
-        pass
+        # 1️⃣ User
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
 
-    if facility_obj is None:
-        facility_obj = await Facility.get(facility_id)
-    if not facility_obj:
-        raise HTTPException(status_code=404, detail="Facility not found")
+        # 2️⃣ Encryption
+        ce = getattr(request.app, "client_encryption", None) or init_encryption()
+        request.app.client_encryption = ce
+
+        # 3️⃣ Conditions
+        conditions = [
+            FacilityFloor.created_by.id == user.id,
+            FacilityFloor.is_deleted == False,
+        ]
+
+        if status:
+            conditions.append(FacilityFloor.status == status.lower())
+
+        if search:
+            conditions.append(
+                RegEx(FacilityFloor.floor_label_search, search.lower())
+            )
+
+        # 4️⃣ Pagination
+        skip = (page - 1) * page_size
+
+        # 5️⃣ Data
+        floors = (
+            await FacilityFloor.find(*conditions, fetch_links=True)
+            .sort("-created_at")
+            .skip(skip)
+            .limit(page_size)
+            .to_list()
+        )
+
+        # 6️⃣ Count
+        total = await FacilityFloor.find(*conditions).count()
+
+        # 7️⃣ Response
+        data = []
+        for floor in floors:
+            data.append({
+                "id": str(floor.id),
+                "floor_label": decrypt_value(ce, floor.floor_label),
+                "floor_display": decrypt_value(ce, floor.display),
+                "facility_id": str(floor.facility_id.id) if floor.facility_id else None,
+                "facility_name": (
+                    floor.facility_id.facility_name_search
+                    if floor.facility_id else None
+                ),
+                "status": floor.status,
+                "created_at": floor.created_at,
+                "updated_at": floor.updated_at,
+            })
+
+        return {
+            "success": True,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": (total + page_size - 1) // page_size,
+            "count": len(data),
+            "total": total,
+            "data": data,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("❌ Crash:", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+
+
+
+
+# @router.get("/get/floor/{facility_id}/")
+# async def get_facility_floors(
+#     facility_id: str,
+#     request: Request,
+#     current_user_id: str = Depends(get_current_user_id),
+#     page: int = Query(1, ge=1),
+#     page_size: int = Query(10, ge=1),
+#     search: str | None = Query(None, description="Search by floor label or display"),
+# ):
+#     ce = getattr(request.app, "client_encryption", None)
+#     if ce is None:
+#         ce = init_encryption()
+#         request.app.client_encryption = ce
+#     user = await UserDoc.get(current_user_id)
+#     if not user:
+#         raise HTTPException(status_code=404, detail="User not found")
+
+#     facility_obj = None
+#     try:
+#         facility_obj_id = PydanticObjectId(facility_id)
+#         facility_obj = await Facility.get(facility_obj_id)
+#     except Exception:
+#         pass
+
+#     if facility_obj is None:
+#         facility_obj = await Facility.get(facility_id)
+#     if not facility_obj:
+#         raise HTTPException(status_code=404, detail="Facility not found")
     
-    # floor = await FacilityFloor.find({"facility_id.$id": facility_obj.id}).to_list()
-    floor = await FacilityFloor.find(
-    FacilityFloor.facility_id.id == facility_obj.id,
-    FacilityFloor.created_by.id == user.id
-    ).to_list()
-    search_lower = search.lower() if search else None
+#     # floor = await FacilityFloor.find({"facility_id.$id": facility_obj.id}).to_list()
+#     floor = await FacilityFloor.find(
+#     FacilityFloor.facility_id.id == facility_obj.id,
+#     FacilityFloor.created_by.id == user.id
+#     ).to_list()
+#     search_lower = search.lower() if search else None
 
     
-    items = []
-    for f in floor:
-        floor_label = _dec_str(ce, f.floor_label)
-        display = _dec_str(ce, f.display)
-        # 🔎 Search logic
-        if search_lower:
-            if (
-                search_lower not in str(floor_label or "").lower()
-                and search_lower not in str(display or "").lower()
-            ):
-                continue
+#     items = []
+#     for f in floor:
+#         floor_label = _dec_str(ce, f.floor_label)
+#         display = _dec_str(ce, f.display)
+#         # 🔎 Search logic
+#         if search_lower:
+#             if (
+#                 search_lower not in str(floor_label or "").lower()
+#                 and search_lower not in str(display or "").lower()
+#             ):
+#                 continue
 
-        items.append({
-            "id": str(f.id),
-            "floor_label":_dec_str(ce, f.floor_label),
-            "display":_dec_str(ce, f.display),
-        })
-    total = len(items)
-    start = (page - 1) * page_size
-    end = start + page_size
-    paginated_docs = items[start:end]
+#         items.append({
+#             "id": str(f.id),
+#             "floor_label":_dec_str(ce, f.floor_label),
+#             "display":_dec_str(ce, f.display),
+#         })
+#     total = len(items)
+#     start = (page - 1) * page_size
+#     end = start + page_size
+#     paginated_docs = items[start:end]
 
   
     
 
-    try:
-        await log_audit(
-            request=request,
-            user_id=str(user.id),
-            action="Read",
-            resource="Facility Floor",
-            resource_id=str(facility_obj.id),
-            status="success",
-            notes="Facility floors fetched successfully",
-        )
-    except Exception:
-        pass
+#     try:
+#         await log_audit(
+#             request=request,
+#             user_id=str(user.id),
+#             action="Read",
+#             resource="Facility Floor",
+#             resource_id=str(facility_obj.id),
+#             status="success",
+#             notes="Facility floors fetched successfully",
+#         )
+#     except Exception:
+#         pass
 
-    return {
-        "items": paginated_docs,
-        "pagination" : {
-            "page": page,
-            "page_size": page_size,
-            "total_items": total,
-            "total_pages": (total + page_size - 1) // page_size,
-        }
-    }
+#     return {
+#         "items": paginated_docs,
+#         "pagination" : {
+#             "page": page,
+#             "page_size": page_size,
+#             "total_items": total,
+#             "total_pages": (total + page_size - 1) // page_size,
+#         }
+#     }
 
 
 @router.put("/update/floor/{floor_id}/")
