@@ -2,7 +2,8 @@ from datetime import datetime, timezone
 from bson import ObjectId
 from fastapi import APIRouter, Request, HTTPException, Depends,Query
 from pydantic import ValidationError
-
+from beanie.operators import RegEx,And
+from typing import Optional
 
 from app.facility.models.facility import Facility
 from app.facility.models.facility_rooms import FacilityRooms
@@ -13,6 +14,7 @@ from app.encryption.encryption import encrypt_value, decrypt_value,init_encrypti
 from app.utils.audit import log_audit
 from app.schemas.facilities.rooms import FacilityRoom
 from beanie import PydanticObjectId
+import re
 
 import json
 import os
@@ -105,7 +107,7 @@ async def create_facility_room(
         room_doc = FacilityRooms(
             room_no_search = normalized_room_no,
             room_type_search = normalized_room_type,
-            room_id=encrypted["room_id"],
+            room_number=encrypted["room_id"],
             room_type=encrypted["room_type"],
             wing=encrypted["wing"],
             room_features=features_enc,
@@ -163,6 +165,129 @@ def _decrypt_json_field(client_encryption, encrypted_val):
     if isinstance(decrypted_raw, (bytes, bytearray)):
         decrypted_raw = decrypted_raw.decode()
     return json.loads(decrypted_raw)
+
+
+@router.get("/list/")
+async def get_facility_rooms(
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+
+    search: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+):
+    try:
+        # 1️⃣ User
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # 2️⃣ Encryption
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+
+        # ----------------------------
+        # 3️⃣ Query conditions (Beanie style)
+        # ----------------------------
+        conditions = [
+            FacilityRooms.created_by.id == user.id,
+            FacilityRooms.is_deleted == False
+        ]
+
+        if status:
+            conditions.append(FacilityRooms.status == status.lower())
+
+        
+        if search:
+            conditions.append(
+                RegEx(FacilityRooms.room_no_search, f"^{search.lower()}")
+            )
+
+        
+        # ----------------------------
+        # 4️⃣ Pagination
+        # ----------------------------
+        skip = (page - 1) * page_size
+
+        # ----------------------------
+        # 5️⃣ Fetch data
+        # ----------------------------
+
+        facility_rooms = await (
+            FacilityRooms.find(
+                *conditions,
+                fetch_links=True
+            )
+            .sort("-created_at")
+            .skip(skip)
+            .limit(page_size)
+            .to_list()
+        )
+
+       
+
+        # ----------------------------
+        # 6️⃣ Total count (IMPORTANT)
+        # ----------------------------
+        total = await FacilityRooms.find(*conditions).count()
+
+        # ----------------------------
+        # 7️⃣ Response
+        # ----------------------------
+
+        result = []
+        for rooms in facility_rooms:
+            result.append({
+                "id": str(rooms.id),
+                "room_number": decrypt_value(ce, rooms.room_number),
+                "room_type": decrypt_value(ce, rooms.room_type),
+                "facility_id": str(rooms.facility_id.id) if rooms.facility_id else None,
+                "facility_name": (
+                    rooms.facility_id.facility_name_search
+                    if rooms.facility_id else None
+                ),
+                "status": rooms.status,
+                "created_at": rooms.created_at,
+                "updated_at": rooms.updated_at,
+            })
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(user.id),
+                action="Read",
+                resource="Facility Rooms",
+                resource_id="LIST",
+                status="success",
+                notes=(
+                    f"Facility Rooms fetched | "
+                    f"page={page}, page_size={page_size}, "
+                    f"search={search}, status={status}, "
+                    f"returned={len(result)}"
+                ),
+            )
+        except Exception:
+            pass
+        return {
+            "success": True,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": (total + page_size - 1) // page_size,
+            "count": len(result),
+            "total": total,
+            "data": result,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("❌ Crash:", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+
 
 
 @router.get("/get/room/{facility_id}/")

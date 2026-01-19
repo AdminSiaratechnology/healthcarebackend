@@ -35,6 +35,8 @@ class FacilityRooms(Document, AutoEncryptMixin, AutoDecryptMixin):
     is_deleted: Annotated[bool, Indexed()] = False
     deleted_at: datetime | None = None
 
+    status: Annotated[str, Indexed()] = "active"
+
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -44,7 +46,7 @@ class FacilityRooms(Document, AutoEncryptMixin, AutoDecryptMixin):
     class Settings:
         name = "facility_rooms"
         indexes = [
-            [("facility_id.$id", 1), ("room_search", 1)],
+            [("facility_id.$id", 1), ("room_no_search", 1)],
             [("facility_id.$id", 1), ("room_type_search", 1)],
             [("is_deleted", 1), ("facility_id.$id", 1)],
             
