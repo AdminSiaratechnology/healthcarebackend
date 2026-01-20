@@ -21,6 +21,8 @@ class UserRole(str, Enum):
     SUPPORT = "support"
     PROVIDER = "provider"
     PATIENT = "patient"
+    DIRECTOR_OF_NURSING = "director_of_nursing"  # DON
+
 
 class UserDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
     full_name: Binary
@@ -37,6 +39,7 @@ class UserDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
     google_auth_secret: Optional[Binary] = None
     is_google_auth_enabled: bool = False
     google_auth_verified_at: Optional[datetime] = None
+    
     # mfa_verified = bool = True
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
