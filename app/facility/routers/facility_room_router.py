@@ -72,7 +72,7 @@ async def create_facility_room(
             FacilityFloor.is_deleted == False,
         )
 
-        print("floorssssssss",floor)
+        
 
 
 

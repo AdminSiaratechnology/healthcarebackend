@@ -9,10 +9,10 @@ class statusEnum(str, Enum):
     Maintenance = "Maintenance"
 
 class Bed(BaseModel):
-    bed_id: Optional[str] = None
+    
     room_id: Optional[str] = None
     bed_number: Optional[str] = None
     designation: Optional[str] = None
-    status : Optional[statusEnum] = statusEnum.Vacant
+    bed_status : Optional[statusEnum] = statusEnum.Vacant
     bariatric: Optional[bool] = False
     move_policy: Optional[str] = None
