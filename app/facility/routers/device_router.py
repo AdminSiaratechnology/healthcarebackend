@@ -206,9 +206,11 @@ async def get_facility_device_inventory(
                 "device_type": decrypt_value(ce, dev.device_type),
                 "count": int(decrypt_value(ce, dev.counts)) if dev.counts else None,
                 "operating_system": decrypt_value(ce, dev.operating_system),
-                
                 "facility_id": str(dev.facility_id.id) if dev.facility_id else None,
-                
+                "facility_name": (
+                    dev.facility_id.facility_name_search
+                    if dev.facility_id else None
+                ),
                 "status": dev.status,
                 "created_at": dev.created_at,
                 "updated_at": dev.updated_at,
@@ -249,7 +251,7 @@ async def get_facility_device_inventory(
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
-        
+
 @router.put("/update/{device_inventory_id}/")
 async def update_facility_device_inventory(
     device_inventory_id: str,

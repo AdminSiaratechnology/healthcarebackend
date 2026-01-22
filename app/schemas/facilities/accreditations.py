@@ -9,7 +9,7 @@ class AccreditationsBodyEnum(str, Enum):
     dnv_healthcare = "DNV Healthcare"
     other = "Other"
 
-class StatusEnum(str, Enum):
+class AccreditationStatusEnum(str, Enum):
     Active = "Active"
     Pending = "Pending"
     Expired = "Expired"
@@ -17,7 +17,7 @@ class StatusEnum(str, Enum):
 
 
 class AccreditationsSchema(BaseModel):
-    accreditations: Optional[AccreditationsBodyEnum] = None
-    status : Optional[StatusEnum] =  StatusEnum.Active
+    accreditations_body: Optional[AccreditationsBodyEnum] = None
+    accreditation_status : Optional[AccreditationStatusEnum] =  AccreditationStatusEnum.Active
     expiry_date : date
     certificate_file_id : Optional[str] = None
