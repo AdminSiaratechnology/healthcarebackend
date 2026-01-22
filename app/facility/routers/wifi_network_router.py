@@ -15,7 +15,8 @@ from app.facility.models.wifi_network import WifiNetwork
 import re
 from typing import Optional
 
-router = APIRouter(prefix="/wifi", tags=["Wifi-Network"])
+
+router = APIRouter(prefix="/wifi-network", tags=["IT & Workstations"])
 
 
 @router.post("/create/{facility_id}/")
