@@ -1,13 +1,13 @@
 from datetime import datetime, timezone
-
-from fastapi import APIRouter, Request, HTTPException, Depends, Form, UploadFile, File
+from bson import ObjectId
+from fastapi import APIRouter, Request, HTTPException, Depends, Form, UploadFile, File,Query
 from pydantic import ValidationError
-
-
+import re
+from typing import Optional
 from app.facility.models.facility import Facility
 from app.accounts.models.user import UserDoc
 from app.auth.deps import get_current_user_id
-from app.encryption.encryption import encrypt_value, decrypt_value, init_encryption, ensure_data_key
+from app.encryption.encryption import encrypt_value, decrypt_value,init_encryption,ensure_data_key,encrypt_value_deterministic,encrypt_dict,decrypt_value
 from app.utils.audit import log_audit
 from app.schemas.facilities.ITWorkstations import NetworkConfigSchema
 from beanie import PydanticObjectId
@@ -17,69 +17,203 @@ import os
 from app.facility.models.network_config import NetworkConfig
 
 
-router = APIRouter(prefix="/facility", tags=["Facility"])
+router = APIRouter(prefix="/workstations", tags=["IT & Workstations"])
+
+
+# @router.post("/create/network-config/{facility_id}/")
+# async def create_network_config(
+#     facility_id: str,
+#     config: NetworkConfigSchema,
+#     request: Request,
+#     current_user_id: str = Depends(get_current_user_id)
+# ):
+#     try:
+#         client_encryption = getattr(request.app, "client_encryption", None)
+#         if client_encryption is None:
+#             client_encryption = init_encryption()
+#         dek_id = getattr(request.app, "dek_id", None)
+#         if dek_id is None:
+#             dek_id = ensure_data_key()
+
+#         def enc_or_none(val):
+#             return encrypt_value(client_encryption, dek_id, val) if val is not None else None
+
+#         def enc_json_or_none(obj):
+#             return (
+#                 encrypt_value(client_encryption, dek_id, json.dumps(obj.model_dump()))
+#                 if obj is not None else None
+#             )
+
+#         try:
+#             facility_obj_id = PydanticObjectId(facility_id)
+#         except Exception:
+#             raise HTTPException(status_code=400, detail="Invalid Facility ID format")
+
+#         facility = await Facility.get(facility_obj_id)
+#         if not facility:
+#             raise HTTPException(status_code=404, detail="Facility not found")
+
+#         user = await UserDoc.get(current_user_id)
+#         if not user:
+#             raise HTTPException(status_code=404, detail="User not found")
+
+#         cfg_doc = NetworkConfig(
+#             facility_id=facility,
+#             primary_isp=enc_or_none(config.primary_isp),
+#             secondary_isp=enc_or_none(config.secondary_isp),
+#             bandwidth=enc_or_none(config.bandwidth),
+#             vpn_required=enc_or_none(config.vpn_required),
+#             printer_routing_map=enc_json_or_none(config.printer_routing_map),
+#             created_by=user,
+#             created_at=datetime.now(timezone.utc),
+#             updated_at=datetime.now(timezone.utc),
+#         )
+
+#         await cfg_doc.insert()
+
+#         try:
+#             await log_audit(
+#                 request=request,
+#                 user_id=str(user.id),
+#                 action="Create",
+#                 resource="Network Config",
+#                 resource_id=str(cfg_doc.id),
+#                 status="success",
+#                 notes="Network configuration created successfully",
+#             )
+#         except Exception:
+#             pass
+
+#         return {
+#             "success": True,
+#             "facility_id_received": str(facility.id),
+#             "network_config_id": str(cfg_doc.id),
+#         }
+
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         try:
+#             await log_audit(
+#                 request=request,
+#                 user_id=str(current_user_id),
+#                 action="Create",
+#                 resource="Network Config",
+#                 resource_id="N/A",
+#                 status="failed",
+#                 notes=str(e),
+#             )
+#         except Exception:
+#             pass
+#         raise HTTPException(status_code=500, detail="Internal Server Error while creating network config")
 
 
 @router.post("/create/network-config/{facility_id}/")
-async def create_network_config(
+async def create_facility_network_config(
     facility_id: str,
-    config: NetworkConfigSchema,
+    payload: NetworkConfigSchema,
     request: Request,
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: str = Depends(get_current_user_id),
 ):
     try:
-        client_encryption = getattr(request.app, "client_encryption", None)
-        if client_encryption is None:
-            client_encryption = init_encryption()
-        dek_id = getattr(request.app, "dek_id", None)
-        if dek_id is None:
-            dek_id = ensure_data_key()
-
-        def enc_or_none(val):
-            return encrypt_value(client_encryption, dek_id, val) if val is not None else None
-
-        def enc_json_or_none(obj):
-            return (
-                encrypt_value(client_encryption, dek_id, json.dumps(obj.model_dump()))
-                if obj is not None else None
-            )
-
-        try:
-            facility_obj_id = PydanticObjectId(facility_id)
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid Facility ID format")
-
-        facility = await Facility.get(facility_obj_id)
-        if not facility:
-            raise HTTPException(status_code=404, detail="Facility not found")
-
+        # 1️⃣ User
         user = await UserDoc.get(current_user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        cfg_doc = NetworkConfig(
+        # 2️⃣ Encryption init  
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+            request.app.dek_id = dek_id
+
+        # 3️⃣ Facility ownership check
+        facility = await Facility.find_one(
+            Facility.id == ObjectId(facility_id),
+            Facility.created_by.id == user.id,
+            # Facility.is_deleted == False,
+        )
+        if not facility:
+            raise HTTPException(status_code=404, detail="Facility not found or you don't have permission")
+
+        # 4️⃣ Normalize primary_isp for duplicate/search (VERY IMPORTANT)
+        if payload.primary_isp:
+            normalized_primary_isp = payload.primary_isp.strip().lower()
+        else:
+            normalized_primary_isp = None
+
+        # 5️⃣ Duplicate validation (ACTIVE RECORDS ONLY) — ek facility mein ek hi network config allowed
+        existing = await NetworkConfig.find_one(
+            NetworkConfig.facility_id.id == facility.id,
+            NetworkConfig.is_deleted == False
+        )
+        if existing:
+            raise HTTPException(
+                status_code=400,
+                detail="Network configuration already exists for this facility"
+            )
+
+        # Optional: agar primary_isp unique banana chahte ho to yeh add kar sakte ho
+        # if normalized_primary_isp:
+        #     duplicate_isp = await NetworkConfig.find_one(
+        #         NetworkConfig.facility_id.id == facility.id,
+        #         NetworkConfig.primary_isp_search == normalized_primary_isp,
+        #         NetworkConfig.is_deleted == False
+        #     )
+        #     if duplicate_isp:
+        #         raise HTTPException(400, "This primary ISP already configured for another facility")
+
+        # 6️⃣ Encrypt fields
+        encrypted = encrypt_dict(
+            ce,
+            dek_id,
+            {
+                "primary_isp": payload.primary_isp,
+                "secondary_isp": payload.secondary_isp,
+                "bandwidth": payload.bandwidth,
+                "vpn_required": str(payload.vpn_required),  # bool ko string mein convert kiya
+                "printer_routing_map": (
+                    json.dumps(payload.printer_routing_map.model_dump())
+                    if payload.printer_routing_map else None
+                ),
+            }
+        )
+
+        # 7️⃣ Save
+        network_doc = NetworkConfig(
             facility_id=facility,
-            primary_isp=enc_or_none(config.primary_isp),
-            secondary_isp=enc_or_none(config.secondary_isp),
-            bandwidth=enc_or_none(config.bandwidth),
-            vpn_required=enc_or_none(config.vpn_required),
-            printer_routing_map=enc_json_or_none(config.printer_routing_map),
             created_by=user,
+            
+            primary_isp=encrypted["primary_isp"],
+            secondary_isp=encrypted["secondary_isp"],
+            bandwidth=encrypted["bandwidth"],
+            vpn_required=encrypted["vpn_required"],
+            printer_routing_map=encrypted["printer_routing_map"],
+            
+            # Searchable field
+            primary_isp_search=normalized_primary_isp,
+            
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
 
-        await cfg_doc.insert()
+        await network_doc.insert()
 
+        # 8️⃣ Audit
         try:
             await log_audit(
                 request=request,
                 user_id=str(user.id),
                 action="Create",
                 resource="Network Config",
-                resource_id=str(cfg_doc.id),
+                resource_id=str(network_doc.id),
                 status="success",
-                notes="Network configuration created successfully",
+                notes="Facility network configuration created successfully",
             )
         except Exception:
             pass
@@ -87,183 +221,415 @@ async def create_network_config(
         return {
             "success": True,
             "facility_id_received": str(facility.id),
-            "network_config_id": str(cfg_doc.id),
+            "network_config_id": str(network_doc.id),
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        try:
-            await log_audit(
-                request=request,
-                user_id=str(current_user_id),
-                action="Create",
-                resource="Network Config",
-                resource_id="N/A",
-                status="failed",
-                notes=str(e),
-            )
-        except Exception:
-            pass
-        raise HTTPException(status_code=500, detail="Internal Server Error while creating network config")
-
-
-def _decrypt_value(client_encryption, encrypted_val):
-    if not encrypted_val:
-        return None
-    decrypted_raw = decrypt_value(client_encryption, encrypted_val)
-    if isinstance(decrypted_raw, (bytes, bytearray)):
-        decrypted_raw = decrypted_raw.decode()
-    return decrypted_raw
-
-
-def _decrypt_json_field(client_encryption, encrypted_val):
-    if not encrypted_val:
-        return None
-    decrypted_raw = decrypt_value(client_encryption, encrypted_val)
-    if isinstance(decrypted_raw, (bytes, bytearray)):
-        decrypted_raw = decrypted_raw.decode()
-    return json.loads(decrypted_raw)
-
-
-@router.get("/get/network-config/{facility_id}/")
-async def get_network_configs(
-    facility_id: str,
-    request: Request,
-    current_user_id: str = Depends(get_current_user_id)
-):
-    user = await UserDoc.get(current_user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    facility_obj = None
-    try:
-        facility_obj_id = PydanticObjectId(facility_id)
-        facility_obj = await Facility.get(facility_obj_id)
-    except Exception:
-        pass
-
-    if facility_obj is None:
-        facility_obj = await Facility.get(facility_id)
-    if not facility_obj:
-        raise HTTPException(status_code=404, detail="Facility not found")
-
-    # encrypt 
-    ce = getattr(request.app, "client_encryption", None)
-    if ce is None:
-        ce = init_encryption()
-        request.app.client_encryption = ce
-    
-    # ---------------- Network Config  ----------------
-    netwrok_config = await NetworkConfig.find(
-        NetworkConfig.facility_id.id == facility_obj.id,
-        NetworkConfig.created_by.id == user.id
-    ).sort("-created_at").to_list()
-   
-
-    # Response 
-   
-    result = [
-        {
-            "id": str(cfg.id),
-            "primary_isp": _decrypt_value(ce, cfg.primary_isp),
-            "secondary_isp": _decrypt_value(ce, cfg.secondary_isp),
-            "bandwidth": _decrypt_value(ce, cfg.bandwidth),
-            "vpn_required": _decrypt_value(ce, cfg.vpn_required),
-            "printer_routing_map": _decrypt_json_field(ce, cfg.printer_routing_map),
-            "created_at": cfg.created_at,
-            "updated_at": cfg.updated_at,
-        } for cfg in netwrok_config
-    ]
-
-    try:
-        await log_audit(
-            request=request,
-            user_id=str(user.id),
-            action="Read",
-            resource="Network Config",
-            resource_id=str(facility_obj.id),
-            status="success",
-            notes="Network configurations fetched successfully",
+        print("❌ Crash:", e)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal Server Error while creating facility network config"
         )
-    except Exception:
-        pass
 
-    return result
+# def _decrypt_value(client_encryption, encrypted_val):
+#     if not encrypted_val:
+#         return None
+#     decrypted_raw = decrypt_value(client_encryption, encrypted_val)
+#     if isinstance(decrypted_raw, (bytes, bytearray)):
+#         decrypted_raw = decrypted_raw.decode()
+#     return decrypted_raw
 
 
-@router.put("/update/network-config/{config_id}/")
-async def update_network_config(
-    config_id: str,
-    payload: NetworkConfigSchema,
+# def _decrypt_json_field(client_encryption, encrypted_val):
+#     if not encrypted_val:
+#         return None
+#     decrypted_raw = decrypt_value(client_encryption, encrypted_val)
+#     if isinstance(decrypted_raw, (bytes, bytearray)):
+#         decrypted_raw = decrypted_raw.decode()
+#     return json.loads(decrypted_raw)
+
+
+# @router.get("/get/network-config/{facility_id}/")
+# async def get_network_configs(
+#     facility_id: str,
+#     request: Request,
+#     current_user_id: str = Depends(get_current_user_id)
+# ):
+#     user = await UserDoc.get(current_user_id)
+#     if not user:
+#         raise HTTPException(status_code=404, detail="User not found")
+
+#     facility_obj = None
+#     try:
+#         facility_obj_id = PydanticObjectId(facility_id)
+#         facility_obj = await Facility.get(facility_obj_id)
+#     except Exception:
+#         pass
+
+#     if facility_obj is None:
+#         facility_obj = await Facility.get(facility_id)
+#     if not facility_obj:
+#         raise HTTPException(status_code=404, detail="Facility not found")
+
+#     # encrypt 
+#     ce = getattr(request.app, "client_encryption", None)
+#     if ce is None:
+#         ce = init_encryption()
+#         request.app.client_encryption = ce
+    
+#     # ---------------- Network Config  ----------------
+#     netwrok_config = await NetworkConfig.find(
+#         NetworkConfig.facility_id.id == facility_obj.id,
+#         NetworkConfig.created_by.id == user.id
+#     ).sort("-created_at").to_list()
+   
+
+#     # Response 
+   
+#     result = [
+#         {
+#             "id": str(cfg.id),
+#             "primary_isp": _decrypt_value(ce, cfg.primary_isp),
+#             "secondary_isp": _decrypt_value(ce, cfg.secondary_isp),
+#             "bandwidth": _decrypt_value(ce, cfg.bandwidth),
+#             "vpn_required": _decrypt_value(ce, cfg.vpn_required),
+#             "printer_routing_map": _decrypt_json_field(ce, cfg.printer_routing_map),
+#             "created_at": cfg.created_at,
+#             "updated_at": cfg.updated_at,
+#         } for cfg in netwrok_config
+#     ]
+
+#     try:
+#         await log_audit(
+#             request=request,
+#             user_id=str(user.id),
+#             action="Read",
+#             resource="Network Config",
+#             resource_id=str(facility_obj.id),
+#             status="success",
+#             notes="Network configurations fetched successfully",
+#         )
+#     except Exception:
+#         pass
+
+#     return result
+
+
+@router.get("/list/network-config/")
+async def get_facility_network_configs(
     request: Request,
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: str = Depends(get_current_user_id),
+
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+
+    search: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
 ):
     try:
-        client_encryption = getattr(request.app, "client_encryption", None)
-        if client_encryption is None:
-            client_encryption = init_encryption()
-        dek_id = getattr(request.app, "dek_id", None)
-        if dek_id is None:
-            dek_id = ensure_data_key()
-
-        def enc_or_none(val):
-            return encrypt_value(client_encryption, dek_id, val) if val is not None else None
-
-        def enc_json_or_none(obj):
-            return (
-                encrypt_value(client_encryption, dek_id, json.dumps(obj.model_dump()))
-                if obj is not None else None
-            )
-
-        cfg_doc = await NetworkConfig.get(config_id)
-        if not cfg_doc:
-            raise HTTPException(status_code=404, detail="Network Config not found")
-
+        # 1️⃣ User
         user = await UserDoc.get(current_user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
+       
+        # 2️⃣ Encryption
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
 
-        cfg_doc.primary_isp = enc_or_none(payload.primary_isp)
-        cfg_doc.secondary_isp = enc_or_none(payload.secondary_isp)
-        cfg_doc.bandwidth = enc_or_none(payload.bandwidth)
-        cfg_doc.vpn_required = enc_or_none(payload.vpn_required)
-        cfg_doc.printer_routing_map = enc_json_or_none(payload.printer_routing_map)
-        cfg_doc.updated_at = datetime.now(timezone.utc)
+        # ----------------------------
+        # 3️⃣ Query conditions (Beanie style)
+        # ----------------------------
+        conditions = [
+            NetworkConfig.created_by.id == user.id,
+            NetworkConfig.is_deleted == False
+        ]
 
-        await cfg_doc.save()
+        if status:
+            conditions.append(NetworkConfig.status == status.lower())
+
+        if search:
+            search_value = search.lower()
+            conditions.append(
+                NetworkConfig.primary_isp_search == re.compile(f".*{search_value}.*", re.IGNORECASE)
+                # partial match (contains) — practical hai ISP names ke liye
+            )
+
+        # ----------------------------
+        # 4️⃣ Pagination
+        # ----------------------------
+        skip = (page - 1) * page_size
+
+        # ----------------------------
+        # 5️⃣ Fetch data
+        # ----------------------------
+
+        network_configs = await (
+            NetworkConfig.find(
+                *conditions,
+                fetch_links=True
+            )
+            .sort("-created_at")
+            .skip(skip)
+            .limit(page_size)
+            .to_list()
+        )
+
+        # ----------------------------
+        # 6️⃣ Total count (IMPORTANT)
+        # ----------------------------
+        total = await NetworkConfig.find(*conditions).count()
+
+        # ----------------------------
+        # 7️⃣ Response
+        # ----------------------------
+
+        result = []
+        for config in network_configs:
+            printer_map_decrypted = None
+            if config.printer_routing_map:
+                try:
+                    printer_map_decrypted = json.loads(decrypt_value(ce, config.printer_routing_map))
+                except:
+                    printer_map_decrypted = None
+
+            result.append({
+                "id": str(config.id),
+                "primary_isp": decrypt_value(ce, config.primary_isp),
+                "secondary_isp": decrypt_value(ce, config.secondary_isp),
+                "bandwidth": decrypt_value(ce, config.bandwidth),
+                "vpn_required": decrypt_value(ce, config.vpn_required) == "True",  # string se bool mein convert
+                "printer_routing_map": printer_map_decrypted,
+                
+                "facility_id": str(config.facility_id.id) if config.facility_id else None,
+                "facility_name": (
+                    config.facility_id.facility_name_search
+                    if config.facility_id else None
+                ),
+                "status": config.status,
+                "created_at": config.created_at,
+                "updated_at": config.updated_at,
+            })
 
         try:
             await log_audit(
                 request=request,
                 user_id=str(user.id),
-                action="Update",
-                resource="Network Config",
-                resource_id=str(cfg_doc.id),
+                action="Read",
+                resource="Network Configs",
+                resource_id="LIST",
                 status="success",
-                notes="Network configuration updated successfully",
+                notes=(
+                    f"Facility Network Configs fetched | "
+                    f"page={page}, page_size={page_size}, "
+                    f"search={search}, status={status}, "
+                    f"returned={len(result)}"
+                ),
             )
         except Exception:
             pass
 
         return {
             "success": True,
-            "network_config_id": str(cfg_doc.id),
+            "page": page,
+            "page_size": page_size,
+            "total_pages": (total + page_size - 1) // page_size,
+            "count": len(result),
+            "total": total,
+            "data": result,
         }
 
     except HTTPException:
         raise
     except Exception as e:
+        print("❌ Crash:", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@router.put("/update/network-config/{network_config_id}/")
+async def update_facility_network_config(
+    network_config_id: str,
+    payload: NetworkConfigSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    try:
+        # 1️⃣ User
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # 2️⃣ Encryption init
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+            request.app.dek_id = dek_id
+
+        # 3️⃣ Get Network Config
+        try:
+            config_obj_id = ObjectId(network_config_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid Network Config ID")
+
+        config = await NetworkConfig.find_one(
+            NetworkConfig.id == config_obj_id,
+            NetworkConfig.created_by.id == user.id,
+            NetworkConfig.is_deleted == False,
+            fetch_links=True
+        )
+
+        if not config:
+            raise HTTPException(status_code=404, detail="Network config not found")
+
+        # 4️⃣ Normalize & check primary_isp (if changing)
+        if payload.primary_isp is not None:
+            normalized_primary_isp = payload.primary_isp.strip().lower()
+            
+            # Optional duplicate check (agar multiple configs allowed hain to yeh hata sakte ho)
+            # duplicate = await NetworkConfig.find_one(
+            #     NetworkConfig.facility_id.id == config.facility_id.id,
+            #     NetworkConfig.primary_isp_search == normalized_primary_isp,
+            #     NetworkConfig.id != config.id,
+            #     NetworkConfig.is_deleted == False,
+            # )
+            # if duplicate:
+            #     raise HTTPException(400, "This primary ISP is already in use")
+
+            config.primary_isp_search = normalized_primary_isp
+            config.primary_isp = encrypt_value(ce, dek_id, payload.primary_isp)
+
+        # 5️⃣ Update encrypted fields (ONLY if provided)
+        if payload.secondary_isp is not None:
+            config.secondary_isp = encrypt_value(ce, dek_id, payload.secondary_isp)
+
+        if payload.bandwidth is not None:
+            config.bandwidth = encrypt_value(ce, dek_id, payload.bandwidth)
+
+        if payload.vpn_required is not None:
+            config.vpn_required = encrypt_value(ce, dek_id, str(payload.vpn_required))
+
+        if payload.printer_routing_map is not None:
+            config.printer_routing_map = encrypt_value(
+                ce,
+                dek_id,
+                json.dumps(payload.printer_routing_map.model_dump())
+            )
+
+        # 6️⃣ Timestamp
+        config.updated_at = datetime.now(timezone.utc)
+
+        await config.save()
+
+        # 7️⃣ Audit
         try:
             await log_audit(
                 request=request,
-                user_id=str(current_user_id),
+                user_id=str(user.id),
                 action="Update",
                 resource="Network Config",
-                resource_id="N/A",
-                status="failed",
-                notes=str(e),
+                resource_id=str(config.id),
+                status="success",
+                notes="Facility network config updated successfully",
             )
         except Exception:
             pass
-        raise HTTPException(status_code=500, detail="Internal Server Error while updating network config")
+
+        return {
+            "success": True,
+            "network_config_id": str(config.id),
+            "message": "Facility network config updated successfully",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("❌ Crash:", e)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal Server Error while updating facility network config"
+        )
+
+
+# @router.put("/update/network-config/{config_id}/")
+# async def update_network_config(
+#     config_id: str,
+#     payload: NetworkConfigSchema,
+#     request: Request,
+#     current_user_id: str = Depends(get_current_user_id)
+# ):
+#     try:
+#         client_encryption = getattr(request.app, "client_encryption", None)
+#         if client_encryption is None:
+#             client_encryption = init_encryption()
+#         dek_id = getattr(request.app, "dek_id", None)
+#         if dek_id is None:
+#             dek_id = ensure_data_key()
+
+#         def enc_or_none(val):
+#             return encrypt_value(client_encryption, dek_id, val) if val is not None else None
+
+#         def enc_json_or_none(obj):
+#             return (
+#                 encrypt_value(client_encryption, dek_id, json.dumps(obj.model_dump()))
+#                 if obj is not None else None
+#             )
+
+#         cfg_doc = await NetworkConfig.get(config_id)
+#         if not cfg_doc:
+#             raise HTTPException(status_code=404, detail="Network Config not found")
+
+#         user = await UserDoc.get(current_user_id)
+#         if not user:
+#             raise HTTPException(status_code=404, detail="User not found")
+
+#         cfg_doc.primary_isp = enc_or_none(payload.primary_isp)
+#         cfg_doc.secondary_isp = enc_or_none(payload.secondary_isp)
+#         cfg_doc.bandwidth = enc_or_none(payload.bandwidth)
+#         cfg_doc.vpn_required = enc_or_none(payload.vpn_required)
+#         cfg_doc.printer_routing_map = enc_json_or_none(payload.printer_routing_map)
+#         cfg_doc.updated_at = datetime.now(timezone.utc)
+
+#         await cfg_doc.save()
+
+#         try:
+#             await log_audit(
+#                 request=request,
+#                 user_id=str(user.id),
+#                 action="Update",
+#                 resource="Network Config",
+#                 resource_id=str(cfg_doc.id),
+#                 status="success",
+#                 notes="Network configuration updated successfully",
+#             )
+#         except Exception:
+#             pass
+
+#         return {
+#             "success": True,
+#             "network_config_id": str(cfg_doc.id),
+#         }
+
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         try:
+#             await log_audit(
+#                 request=request,
+#                 user_id=str(current_user_id),
+#                 action="Update",
+#                 resource="Network Config",
+#                 resource_id="N/A",
+#                 status="failed",
+#                 notes=str(e),
+#             )
+#         except Exception:
+#             pass
+#         raise HTTPException(status_code=500, detail="Internal Server Error while updating network config")

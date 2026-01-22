@@ -6,15 +6,31 @@ from app.facility.models.facility import Facility
 from beanie import Document, Link
 from bson import Binary
 from datetime import datetime, timezone
+from typing_extensions import Annotated
+from beanie import Indexed
 
 class NetworkConfig(Document, AutoEncryptMixin, AutoDecryptMixin):
     facility_id: Link[Facility] = Field(..., description="Reference to the associated facility")
+    created_by: Link[UserDoc] | None = None
+    deleted_by: Link[UserDoc] | None = None
+    
+    # 🔐 Encrypted
     primary_isp: Binary | None = None
     secondary_isp: Binary | None = None
     bandwidth: Binary | None = None
     vpn_required: Binary | None = None
     printer_routing_map: Binary | None = None
-    created_by: Link[UserDoc] | None = None
+
+    # 🟢 Searchable (NON-PHI)
+    primary_isp_search: Annotated[str | None, Indexed()] = None
+
+    # 🔁 Soft delete
+    is_deleted: Annotated[bool, Indexed()] = False
+    deleted_at: datetime | None = None
+
+    status: Annotated[str, Indexed()] = "active"
+
+    # 📅 Timestamps
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
@@ -22,3 +38,8 @@ class NetworkConfig(Document, AutoEncryptMixin, AutoDecryptMixin):
 
     class Settings:
         name = "network_configs"
+        indexes = [
+            [("facility_id.$id", 1), ("primary_isp_search", 1)],
+            [("is_deleted", 1), ("facility_id.$id", 1)],
+            
+        ]

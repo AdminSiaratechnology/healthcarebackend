@@ -10,7 +10,6 @@ from app.auth.deps import get_current_user_id
 from app.encryption.encryption import encrypt_value, decrypt_value,init_encryption,ensure_data_key,encrypt_value_deterministic,encrypt_dict,decrypt_value
 from app.utils.audit import log_audit
 from app.schemas.facilities.Imaging_center import ImagingCenterSchema   
-from beanie import PydanticObjectId
 import re
 from app.facility.models.imaging_center import ImagingCenter
 
