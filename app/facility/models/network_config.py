@@ -10,6 +10,8 @@ from typing_extensions import Annotated
 from beanie import Indexed
 
 class NetworkConfig(Document, AutoEncryptMixin, AutoDecryptMixin):
+    
+    # 🔗 Relations
     facility_id: Link[Facility] = Field(..., description="Reference to the associated facility")
     created_by: Link[UserDoc] | None = None
     deleted_by: Link[UserDoc] | None = None

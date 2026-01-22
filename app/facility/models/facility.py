@@ -20,7 +20,8 @@ class Facility(Document):
     status: Annotated[str, Indexed()] = "active"
 
     
-
+     # 🔁 Soft delete
+    is_deleted: Annotated[bool, Indexed()] = False
     created_by: Link[UserDoc] | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -32,4 +33,5 @@ class Facility(Document):
         indexes = [
             [("facility_name_search", 1), ("created_by.$id", 1)],
             [("status", 1), ("created_by.$id", 1)],
+            [("is_deleted", 1), ("facility_id.$id", 1)],
         ]
