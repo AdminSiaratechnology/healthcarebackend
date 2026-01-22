@@ -134,14 +134,6 @@ async def create_facility_regulatory_info(
             detail="Internal Server Error while creating facility regulatory info"
         )
 
-def _decrypt_json_field(client_encryption, encrypted_val):
-    if not encrypted_val:
-        return None
-    decrypted_raw = decrypt_value(client_encryption, encrypted_val)
-    if isinstance(decrypted_raw, (bytes, bytearray)):
-        decrypted_raw = decrypted_raw.decode()
-    return json.loads(decrypted_raw)
-
 
 # @router.get("/get/regulatory/{facility_id}/")
 # async def get_regulatory_info(
