@@ -60,6 +60,8 @@ async def create_facility_network_config(
         else:
             normalized_primary_isp = None
 
+        
+
         # 5️⃣ Duplicate validation (ACTIVE RECORDS ONLY) — ek facility mein ek hi network config allowed
         existing = await NetworkConfig.find_one(
             NetworkConfig.facility_id.id == facility.id,
