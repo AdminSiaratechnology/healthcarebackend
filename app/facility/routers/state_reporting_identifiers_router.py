@@ -18,7 +18,7 @@ router = APIRouter(prefix="/state-reporting", tags=["State Reporting Identifiers
 
 
 
-@router.post("/create/state-reporting-identifiers/{facility_id}/")
+@router.post("/create/{facility_id}/")
 async def create_state_reporting_identifier(
     facility_id: str,
     payload: StateReportingIdentifiersSchema,
