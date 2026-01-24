@@ -24,7 +24,7 @@ class DeviceInventory(Document, AutoEncryptMixin, AutoDecryptMixin):
     device_type_search: Annotated[str | None, Indexed()] = None
 
 
-     # 🔁 Soft delete
+    # 🔁 Soft delete
     is_deleted: Annotated[bool, Indexed()] = False
     deleted_at: datetime | None = None
 

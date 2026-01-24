@@ -52,7 +52,7 @@ async def create_facility_room(
             dek_id = ensure_data_key()
             request.app.dek_id = dek_id
 
-         # 3️⃣ Facility ownership check
+        # 3️⃣ Facility ownership check
         facility = await Facility.find_one(
             Facility.id == ObjectId(facility_id),
             Facility.created_by.id == user.id,
