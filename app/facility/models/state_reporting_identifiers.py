@@ -22,7 +22,7 @@ class StateReportingIdentifiersDocs(Document, AutoEncryptMixin, AutoDecryptMixin
     # 🟢 Searchable (NON-PHI)
     registry_system_name_search: Annotated[str | None, Indexed()] = None
 
-     # 🔁 Soft delete
+    # 🔁 Soft delete
     is_deleted: Annotated[bool, Indexed()] = False
     deleted_at: datetime | None = None
 

@@ -213,7 +213,7 @@ async def get_facility_rooms(
             search_value = search.lower()
             conditions.append(
                 Or(
-                     RegEx(FacilityRooms.room_no_search, f"^{search_value}"),
+                    RegEx(FacilityRooms.room_no_search, f"^{search_value}"),
                     RegEx(FacilityRooms.facility_id.facility_name_search, f"^{search_value}"),
                     
                 )

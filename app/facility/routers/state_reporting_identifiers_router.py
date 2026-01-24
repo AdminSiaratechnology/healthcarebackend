@@ -283,8 +283,13 @@ async def get_facility_state_reporting_identifiers(
             result.append({
                 "id": str(identifier.id),
                 "facility_id": str(identifier.facility_id.id) if identifier.facility_id else None,
+                "facility_name": (
+                    identifier.facility_id.facility_name_search
+                    if identifier.facility_id else None
+                ),
                 "registry_system_name": decrypt_value(ce, identifier.registry_system_name),
                 "identifier_value": decrypt_value(ce, identifier.identifier_value),
+                
                 
                 "status": identifier.status,
                 "created_at": identifier.created_at,
