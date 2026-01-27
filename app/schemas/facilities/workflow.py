@@ -43,6 +43,6 @@ class FacilityWorkflowSchema(BaseModel):
     documentation_workflow: Optional[DocumentationWorkflow] = None
     billing_workflow: Optional[BillingWorkflow] = None
     clinical_protocols: Optional[ClinicalProtocols] = None
-    # transport_vendors: List[TransportVendor] = Field(default_factory=list)
+  
     vaccine_rules: Optional[VaccineRules] = None
 

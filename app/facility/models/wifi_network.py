@@ -8,8 +8,9 @@ from bson import Binary
 from datetime import datetime, timezone
 from typing_extensions import Annotated
 
+
 class WifiNetwork(Document, AutoEncryptMixin, AutoDecryptMixin):
-     # 🔗 Relations
+    # 🔗 Relations
     facility_id: Link[Facility] = Field(..., description="Reference to the associated facility")
     created_by: Link[UserDoc] | None = None
     deleted_by: Link[UserDoc] | None = None
