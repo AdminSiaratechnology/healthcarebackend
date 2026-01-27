@@ -264,7 +264,7 @@ async def get_facility_accreditations(
         ]
 
         if status:
-            conditions.append(AccerditationsDoc.accreditation_status == status.lower())
+            conditions.append(AccerditationsDoc.status == status.lower())
 
         if search:
             search_value = search.lower()
