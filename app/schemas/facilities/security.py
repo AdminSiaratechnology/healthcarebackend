@@ -38,8 +38,8 @@ class PrivacyOfficerInfo(BaseModel):
 
 
 class SecuritySchema(BaseModel):
-    user_roles_access: Optional[UserRolesAccess] = None
-    authentication_sessions: Optional[AuthenticationSessions] = None
+    # user_roles_access: Optional[UserRolesAccess] = None
+    # authentication_sessions: Optional[AuthenticationSessions] = None
     phi_export_settings: Optional[phiExportSettings] = None
     break_glass_audit: Optional[BreakGlassAudit] = None
     privacy_officer_info: Optional[PrivacyOfficerInfo] = None
