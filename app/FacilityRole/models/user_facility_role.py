@@ -22,12 +22,13 @@ class UserFacilityRole(Document):
     role: FacilityRole
 
     is_primary: bool = False
-    is_active: bool = True
+   
 
     created_by: Link[UserDoc] | None = None
     deleted_by: Link[UserDoc] | None = None
 
     is_deleted: Annotated[bool, Indexed()] = False
+    status: Annotated[str, Indexed()] = "active"
     
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

@@ -31,6 +31,13 @@ class UserDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
     role: Optional[Binary] = None
     is_active: bool = True
     password: Optional[Binary] = None
+
+     # 🔍 Searchable (PLAIN TEXT)
+    full_name_search: Optional[str] = None
+    email_search: Optional[str] = None
+    phone_search: Optional[str] = None
+
+
     mpin: Optional[Binary] = None
     mpin_index: Optional[Binary] = None
     qr_code : Optional[Binary] = None
@@ -44,9 +51,17 @@ class UserDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
-    class Settings:
-        name = "users"
-
     model_config = {
         "arbitrary_types_allowed": True
     }
+
+
+    class Settings:
+        name = "users"
+        indexes = [
+            [("full_name_search", 1)],
+            [("email_search", 1)],
+            [("phone_search", 1)],
+        ]
+
+    

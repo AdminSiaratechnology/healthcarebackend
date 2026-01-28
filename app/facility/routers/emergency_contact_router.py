@@ -17,7 +17,7 @@ from beanie import PydanticObjectId
 import json
 import os
 from app.facility.models.emergency_contact import EmergencyContactDocs
-from fastapi import APIRouter
+
 
 router = APIRouter(prefix="/emergency", tags=["Emergency-contact"])
 
