@@ -4,7 +4,6 @@ from fastapi import APIRouter, Request, HTTPException, Depends, Form, UploadFile
 from pydantic import ValidationError
 from typing import Optional
 
-
 from app.facility.models.facility import Facility
 from app.facility.models.facility_rooms import FacilityRooms
 
