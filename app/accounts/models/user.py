@@ -21,6 +21,7 @@ class UserRole(str, Enum):
     SUPPORT = "support"
     PROVIDER = "provider"
     PATIENT = "patient"
+    SCHEDULER = "scheduler"
     DIRECTOR_OF_NURSING = "director_of_nursing"  # DON
 
 

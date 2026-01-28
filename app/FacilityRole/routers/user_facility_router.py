@@ -327,6 +327,7 @@ async def get_facility_user(
                     RegEx(UserFacilityRole.user_id.phone_search, f"^{search_value}"),
                     RegEx(UserFacilityRole.user_id.email_search, f"^{search_value}"),
                     RegEx(UserFacilityRole.facility_id.facility_name_search, f"^{search_value}"),
+                    RegEx(UserFacilityRole.role, f"^{search_value}"),
                    
                 )
                
@@ -446,7 +447,7 @@ async def update_facility_user(
 
     try:
         user_facility_role_oid = ObjectId(user_facility_role_id)
-    except InvalidId:
+    except Exception:
         raise HTTPException(
             status_code=400,
             detail="Invalid user_facility_role_id"
