@@ -26,7 +26,7 @@ from app.utils.audit import log_audit
 from app.utils.s3_utils import put_object, safe_filename, get_bucket_name
 
 
-router = APIRouter(prefix="/providerss", tags=["Providers-New"])
+router = APIRouter(prefix="/providers", tags=["Providers"])
 
 
 # ========================= ENUMS ========================= #

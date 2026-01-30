@@ -28,7 +28,7 @@ from app.facility.routers.security_router import router as security_router
 from app.facility.routers.breach_contact import router as breach_contact
 from app.facility.routers.quality_router import router as quality_router
 from app.facility.routers.quality_reporting_router import router as quality_reporting_router
-from app.provider.router.provider_router import router as provider_router
+from app.provider.router.provider_router_nw import router as provider_router_nw
 from app.provider.router.practice_router import router as practice_router
 from app.provider.router.clinical_router import router as clinical_router
 from app.provider.router.security_router import router as provider_security_router
@@ -50,7 +50,7 @@ from app.device.router.device_router import router as devices_router
 from app.PatientNotes.routers.notes_router import router as notes_router
 from app.ShiftManagement.routers.shift_router import router as shiftmanagement_router
 from app.FacilityRole.routers.user_facility_router import router as user_facility_router
-from app.provider.router.provider_router_nw import router as provider_router_nw
+
 
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -115,10 +115,10 @@ app.include_router(security_router)
 app.include_router(breach_contact)
 app.include_router(quality_router)
 app.include_router(quality_reporting_router)
-app.include_router(provider_router)
-app.include_router(practice_router)
-app.include_router(clinical_router)
-app.include_router(provider_security_router)
+app.include_router(provider_router_nw)
+# app.include_router(practice_router)
+# app.include_router(clinical_router)
+# app.include_router(provider_security_router)
 app.include_router(provider_documents_router)
 app.include_router(patient_router)
 app.include_router(patient_admissions_router)
@@ -167,7 +167,7 @@ app.include_router(notes_router)
 
 app.include_router(shiftmanagement_router)
 app.include_router(user_facility_router)
-app.include_router(provider_router_nw)
+
 
 
 
