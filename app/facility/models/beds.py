@@ -45,6 +45,11 @@ class Beds(Document, AutoEncryptMixin, AutoDecryptMixin):
 
     class Settings:
         name = "beds"
-        [("facility_id.$id", 1), ("bed_no_search", 1)],
-        [("facility_id.$id", 1), ("bed_status_search", 1)],
-        [("is_deleted", 1), ("facility_id.$id", 1)],
+        indexes = [
+            [("facility_id.$id", 1), ("bed_no_search", 1)],
+            [("facility_id.$id", 1), ("bed_status_search", 1)],
+            [("is_deleted", 1), ("facility_id.$id", 1)],
+
+        ]
+        
+       

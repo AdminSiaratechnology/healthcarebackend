@@ -11,7 +11,7 @@ from app.utils.audit import log_audit
 from bson import ObjectId
 from typing import Annotated, Optional
 from beanie import PydanticObjectId
-from beanie.operators import RegEx
+from beanie.operators import RegEx,Or
 from beanie.operators import And
 
 

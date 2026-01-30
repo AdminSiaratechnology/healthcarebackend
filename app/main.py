@@ -50,7 +50,7 @@ from app.device.router.device_router import router as devices_router
 from app.PatientNotes.routers.notes_router import router as notes_router
 from app.ShiftManagement.routers.shift_router import router as shiftmanagement_router
 from app.FacilityRole.routers.user_facility_router import router as user_facility_router
-
+from app.provider.router.provider_router_nw import router as provider_router_nw
 
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -167,6 +167,7 @@ app.include_router(notes_router)
 
 app.include_router(shiftmanagement_router)
 app.include_router(user_facility_router)
+app.include_router(provider_router_nw)
 
 
 
