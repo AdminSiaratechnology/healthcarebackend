@@ -21,10 +21,15 @@ from app.encryption.encryption import (
     init_encryption,
     ensure_data_key,
     decrypt_value,
+    safe_decrypt_list,
+    
 )
 from app.utils.audit import log_audit
 from app.utils.s3_utils import put_object, safe_filename, get_bucket_name
 
+from app.database.config import settings
+from botocore.config import Config
+from typing import List
 
 router = APIRouter(prefix="/providers", tags=["Providers"])
 
@@ -83,8 +88,7 @@ class BillingLocationCode(str, Enum):
 
 # ========================= API ========================= #
 
-from app.database.config import settings
-from botocore.config import Config
+
 
 def _s3_client():
     region = settings.AWS_REGION
@@ -163,8 +167,9 @@ async def create_provider(
     primary_facility_id: str = Form(...),
 
     # 🔹 Enums
-    rotation_days: RotationDays = Form(...),
-    oncall_days: OnCallDays = Form(...),
+    
+    rotation_days: List[RotationDays] = Form(...),
+    oncall_days: List[OnCallDays] = Form(...),
     visit_type: VisitType = Form(...),
     billing_location_code: BillingLocationCode = Form(...),
 
@@ -293,8 +298,8 @@ async def create_provider(
                 "dea_expiration_date": dea_expiration_date,
                 "professional_email": professional_email,
                 "professional_phone": professional_phone,
-                "rotation_days": rotation_days.value,
-                "oncall_days": oncall_days.value,
+                "rotation_days": [d.value for d in rotation_days],
+                "oncall_days": [d.value for d in oncall_days],
                 "visit_type": visit_type.value,
                 "billing_location_code": billing_location_code.value,
             },
@@ -433,6 +438,18 @@ async def get_all_providers(
                     "name": prov.primary_facility_id.facility_name_search
                 }
 
+            # rotation_days and oncall_days may be stored as encrypted list or string
+            rd_raw = decrypt_value(ce, prov.rotation_days)
+            oc_raw = decrypt_value(ce, prov.oncall_days)
+            rotation_days = (
+                rd_raw if isinstance(rd_raw, list)
+                else ([rd_raw] if rd_raw else [])
+            )
+            oncall_days = (
+                oc_raw if isinstance(oc_raw, list)
+                else ([oc_raw] if oc_raw else [])
+            )
+
             result.append({
                 "id": str(prov.id),
                 "full_name": decrypt_value(ce, prov.user.full_name) if prov.user else None,
@@ -443,6 +460,8 @@ async def get_all_providers(
                 "degree": decrypt_value(ce, prov.degree),
                 "speciality": decrypt_value(ce, prov.speciality),
                 "professional_phone": decrypt_value(ce, prov.professional_phone),
+                "rotation_days": rotation_days,
+                "oncall_days": oncall_days,
                 "profile_pic": prov.profile_pic,
                 "facilities": facility_list,
                 "primary_facility": primary_fac_data,
@@ -517,8 +536,8 @@ async def update_provider(
     primary_facility_id: str = Form(None),
 
     # 🔹 Enums
-    rotation_days: RotationDays = Form(None),
-    oncall_days: OnCallDays = Form(None),
+    rotation_days: List[RotationDays] = Form(None),
+    oncall_days: List[OnCallDays] = Form(None),
     visit_type: VisitType = Form(None),
     billing_location_code: BillingLocationCode = Form(None),
 
@@ -605,8 +624,8 @@ async def update_provider(
         if professional_email is not None: update_data["professional_email"] = professional_email
         if professional_phone is not None: update_data["professional_phone"] = professional_phone
         
-        if rotation_days is not None: update_data["rotation_days"] = rotation_days.value
-        if oncall_days is not None: update_data["oncall_days"] = oncall_days.value
+        if rotation_days is not None: update_data["rotation_days"] = [d.value for d in rotation_days]
+        if oncall_days is not None: update_data["oncall_days"] = [d.value for d in oncall_days]
         if visit_type is not None: update_data["visit_type"] = visit_type.value
         if billing_location_code is not None: update_data["billing_location_code"] = billing_location_code.value
 

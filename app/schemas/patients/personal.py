@@ -55,8 +55,68 @@ class ContactInformation(BaseModel):
     password : Optional[str] = None
 
 
+class AdmissionTypeEnum(str, Enum):
+    Elective = "Elective"
+    Emergency = "Emergency"
+    transfer = "Transfer"
+    Other = "Other"
+
+
+class PatientStatus(str, Enum):
+    Active = "Active"
+    Inactive = "Inactive"
+    Discharged = "Discharged"
+    Transferred = "Transferred"
+
+
+class AdmittedForm(str, Enum):
+    Home = "Home"
+    Hospital = "Hospital"
+    NursingHome = "Nursing Home"
+    Other_facility = "Other Facility"
+
+
+class Admission(BaseModel):
+    admission_date : date = None
+    original_admission_date : date = None
+    admissio_location : Optional[str] = None
+    resident_no : Optional[str] = None
+    admission_type : AdmissionTypeEnum
+    patient_status : PatientStatus = PatientStatus.Active 
+    admitted_form : AdmittedForm
+    from_date : date
+    to_date : date
+
+
+
+
+class CurrentAddress(BaseModel):
+    street_address : Optional[str] = None
+    city : Optional[str] = None
+    state : Optional[str] = None
+    zipcode : Optional[int] = None
+    country : Optional[str] = None
+
+
+class PreviousAddress(BaseModel):
+    street_address : Optional[str] = None
+    city : Optional[str] = None
+    state : Optional[str] = None
+    zipcode : Optional[int] = None
+    country : Optional[str] = None
+
+
+
+
+
+    
 class PatientSchema(BaseModel):
     provider_id : str
+    bed_id :str
     personal_information : Optional[PersonalInfo] = None
     contact_information : Optional[ContactInformation] = None
+    admission_information : Optional[Admission] = None
+    current_address : Optional[CurrentAddress] = None
+    previous_address : Optional[PreviousAddress] = None
+
     

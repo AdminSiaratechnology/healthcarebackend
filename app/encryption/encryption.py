@@ -116,3 +116,32 @@ def _decrypt_json_field(client_encryption, encrypted_val):
 #         return None
 #     raw = decrypt_value(client_encryption, encrypted_val)
 #     return raw.decode() if isinstance(raw, (bytes, bytearray)) else raw
+
+
+
+
+
+def safe_decrypt(ce, value):
+    """
+    Single encrypted field
+    """
+    if value is None:
+        return None
+    if isinstance(value, Binary):
+        return decrypt_value(ce, value)
+    return value  # already decrypted / plain
+
+
+def safe_decrypt_list(ce, values):
+    """
+    List of encrypted fields
+    """
+    if not values:
+        return []
+    result = []
+    for v in values:
+        if isinstance(v, Binary):
+            result.append(decrypt_value(ce, v))
+        else:
+            result.append(v)
+    return result
