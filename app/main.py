@@ -122,11 +122,11 @@ app.include_router(provider_router_nw)
 # app.include_router(provider_security_router)
 app.include_router(provider_documents_router)
 app.include_router(patient_router)
-app.include_router(patient_admissions_router)
-app.include_router(patient_address_router)
-app.include_router(insurance_router)
-app.include_router(patient_emergency_contact_router)
-app.include_router(patient_medical_router)
+# app.include_router(patient_admissions_router)
+# app.include_router(patient_address_router)
+# app.include_router(insurance_router)
+# app.include_router(patient_emergency_contact_router)
+# app.include_router(patient_medical_router)
 
 # --------------------------------- Category -------------------------------------
 

@@ -49,7 +49,7 @@ from app.patients.models.medical import PatientMedicalDoc
 from app.clinicalmonitoring.models.category import CategoryDoc
 from app.clinicalmonitoring.models.subcategory import SubcategoryDoc
 from app.clinicalmonitoring.models.template_builder import TemplateBuilderDoc
-from app.schedule.models.scheduler import SchedulerDoc
+from app.schedule.models.schedule import SchedulerDoc
 from app.prescriptions.models.prescription import PrescriptionDoc
 from app.device.models.device import DeviceDoc
 from app.PatientNotes.models.notes import PatientNotesDoc

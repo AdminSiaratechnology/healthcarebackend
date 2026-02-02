@@ -459,6 +459,7 @@ async def get_all_providers(
                 "full_name": decrypt_value(ce, prov.user.full_name) if prov.user else None,
                 "email": decrypt_value(ce, prov.user.email) if prov.user else None,
                 "first_name": decrypt_value(ce, prov.first_name),
+                "middle_name" : decrypt_value(ce, prov.middle_name),
                 "last_name": decrypt_value(ce, prov.last_name),
                 # "phone": decrypt_value(ce, prov.user.phone),
                 "degree": decrypt_value(ce, prov.degree),
@@ -471,11 +472,15 @@ async def get_all_providers(
                 "dea_no": decrypt_value(ce, prov.dea_no),
                 "dea_expiration_date": decrypt_value(ce, prov.dea_expiration_date),
                 "professional_phone": decrypt_value(ce, prov.professional_phone),
+                "visit_type" : decrypt_value(ce, prov.visit_type),
+                "location_code" : decrypt_value(ce, prov.billing_location_code),
                 "rotation_days": rotation_days,
                 "oncall_days": oncall_days,
                 "profile_pic": prov.profile_pic,
+                "profile_pic": prov.signature,
                 "facilities": facility_list,
                 "primary_facility": primary_fac_data,
+               
                 "status": prov.status,
                 "created_at": prov.created_at,
             })

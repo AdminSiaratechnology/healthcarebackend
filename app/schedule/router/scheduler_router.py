@@ -15,7 +15,7 @@ from beanie import PydanticObjectId
 from beanie.operators import In
 import json
 import os
-from app.schedule.models.scheduler import SchedulerDoc
+from app.schedule.models.schedule import SchedulerDoc
 
 router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
 
