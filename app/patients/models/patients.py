@@ -12,7 +12,7 @@ from app.facility.models.beds import Beds
 from typing_extensions import Annotated
 
 class PatientDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
-     # 🔗 Relations
+    # 🔗 Relations
     facility_id: Link[Facility] = Field(..., description="Reference to the associated facility")
     bed_id : Link[Beds]
     provider_id : Link["Provider"] | None = None
@@ -23,8 +23,12 @@ class PatientDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
     # 🔐 Encrypted
     personal_information : Binary | None = None
     admisson_information : Binary | None = None
+    address_information : Binary | None = None
+    insurance_information : Binary | None = None
+    emergency_contact_information : Binary | None = None
 
-      # 🔁 Soft delete
+
+    # 🔁 Soft delete
     is_deleted: Annotated[bool, Indexed()] = False
     deleted_at: datetime | None = None
 

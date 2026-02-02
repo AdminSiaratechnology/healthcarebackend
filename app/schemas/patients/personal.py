@@ -107,8 +107,45 @@ class PreviousAddress(BaseModel):
 
 
 
+# -------------------------------- Insurance ----------------------------------------------
 
 
+
+class medicareInformation(BaseModel):
+    beneficiary_id : Optional[str] = None
+    primary_payer : Optional[str] = None
+    partd_policy : Optional[str] = None
+    medicare_parta : bool = False
+    medicare_partb : bool = False
+    medicaid_number : Optional[str] = None
+
+
+class MedicareAdvantage(BaseModel):
+    medicare_advantage_name : Optional[str] = None
+    policy_number : Optional[str] = None
+
+
+class PrimarySecondaryInsurance(BaseModel):
+    primary_insurance_cmp : Optional[str] = None
+    secondary_provider_name : Optional[str] = None
+    primary_policy_no : Optional[str] = None
+    secondary_policy_no : Optional[str] = None
+    case_manager : Optional[str] = None
+    authorization_no : Optional[str] = None
+
+
+# -------------------------------- Emergency Contact & Physician ----------------------------------------------
+
+class EmergencyContact(BaseModel):
+    name : Optional[str] = None
+    relationship : Optional[str] = None
+    phone_number : Optional[str] = None
+
+   
+class SecondaryEmergencyContact(BaseModel):
+    name : Optional[str] = None
+    relationship : Optional[str] = None
+    phone_number : Optional[str] = None
     
 class PatientSchema(BaseModel):
     provider_id : str
@@ -118,5 +155,10 @@ class PatientSchema(BaseModel):
     admission_information : Optional[Admission] = None
     current_address : Optional[CurrentAddress] = None
     previous_address : Optional[PreviousAddress] = None
+    medicare_information : Optional[medicareInformation] = None
+    medicare_advantage : Optional[MedicareAdvantage] = None
+    primary_secondary_insurance : Optional[PrimarySecondaryInsurance] = None
+    emergency_contact : Optional[EmergencyContact] = None
+    secondary_emergency_contact : Optional[SecondaryEmergencyContact] = None
 
     

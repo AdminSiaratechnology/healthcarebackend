@@ -228,11 +228,15 @@ async def create_provider(
         if await UserDoc.find_one(UserDoc.email == enc_email_det):
             raise HTTPException(400, "Email already exists")
 
+        print("fullname ",full_name)
         user = UserDoc(
             full_name=encrypt_value(ce, dek_id, full_name),
             email=enc_email_det,
             password=encrypt_value(ce, dek_id, hash_password(password)),
             role=encrypt_value(ce, dek_id, UserRole.PROVIDER.value),
+            full_name_search = full_name,
+            email_search = email,
+            phone_search = professional_phone,
             is_active=True,
             created_by=creator,
         )
@@ -668,6 +672,10 @@ async def update_provider(
             linked_user = await UserDoc.get(provider.user.id)
             if linked_user:
                 linked_user.full_name = encrypt_value(ce, dek_id, full_name)
+                linked_user.full_name_search = full_name
+                linked_user.email_search = professional_email
+                linked_user.phone_search = professional_phone
+                linked_user.updated_at = datetime.now(timezone.utc)
                 await linked_user.save()
 
         provider.updated_at = datetime.now(timezone.utc)

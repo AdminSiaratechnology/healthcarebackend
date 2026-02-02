@@ -217,12 +217,36 @@ async def create_patient(
                 payload.admission_information.model_dump_json(exclude_none=True)
             )
 
+        # 8️⃣ Encrypt Address Information (current + previous)
+        encrypted_addr = None
+        if payload.current_address or payload.previous_address:
+            addr_payload = {
+                "current_address": payload.current_address.model_dump(exclude_none=True) if payload.current_address else None,
+                "previous_address": payload.previous_address.model_dump(exclude_none=True) if payload.previous_address else None,
+            }
+            addr_json = json.dumps(addr_payload, default=str)
+            encrypted_addr = encrypt_value(ce, dek_id, addr_json)
+
         # 8️⃣ Contact info required
         if not payload.contact_information:
             raise HTTPException(status_code=400, detail="Contact information required")
 
         ci = payload.contact_information
         hashed_password = hash_password(ci.password) if ci.password else None
+
+        encrypted_ins = None
+        if (
+            payload.medicare_information
+            or payload.medicare_advantage
+            or payload.primary_secondary_insurance
+        ):
+            ins_payload = {
+                "medicare_information": payload.medicare_information.model_dump(exclude_none=True) if payload.medicare_information else None,
+                "medicare_advantage": payload.medicare_advantage.model_dump(exclude_none=True) if payload.medicare_advantage else None,
+                "primary_secondary_insurance": payload.primary_secondary_insurance.model_dump(exclude_none=True) if payload.primary_secondary_insurance else None,
+            }
+            ins_json = json.dumps(ins_payload, default=str)
+            encrypted_ins = encrypt_value(ce, dek_id, ins_json)
 
         # 9️⃣ Create Patient User
         full_name = f"{payload.personal_information.first_name or ''} {payload.personal_information.last_name or ''}".strip()
@@ -249,6 +273,8 @@ async def create_patient(
             user_id=patient_user,
             personal_information=encrypted_pi,
             admisson_information=encrypted_ai,
+            address_information=encrypted_addr,
+            insurance_information=encrypted_ins,
             created_by=admin_user,
         )
 
