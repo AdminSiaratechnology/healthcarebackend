@@ -19,6 +19,7 @@ class PatientDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
     created_by: Link[UserDoc] | None = None
     deleted_by: Link[UserDoc] | None = None
     user_id : Link[UserDoc] | None = None
+    
 
     # 🔐 Encrypted
     personal_information : Binary | None = None
@@ -26,6 +27,7 @@ class PatientDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
     address_information : Binary | None = None
     insurance_information : Binary | None = None
     emergency_contact_information : Binary | None = None
+    diagnosis : Binary | None = None
 
 
     # 🔁 Soft delete

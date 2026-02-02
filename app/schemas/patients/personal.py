@@ -1,5 +1,5 @@
 from pydantic import BaseModel,EmailStr
-from typing import Optional
+from typing import Optional, List
 from datetime import date
 from enum import Enum
 
@@ -146,6 +146,19 @@ class SecondaryEmergencyContact(BaseModel):
     name : Optional[str] = None
     relationship : Optional[str] = None
     phone_number : Optional[str] = None
+
+
+
+
+# -------------------------------- Diagnosis Information ----------------------------------------------
+
+class DiagnosisInformation(BaseModel):
+    primary_diagnosis: Optional[str] = None
+    secondary_diagnosis: Optional[str] = None
+    onset_date: Optional[date] = None
+    classifications: Optional[str] = None
+    allergy: Optional[List[str]] = None
+
     
 class PatientSchema(BaseModel):
     provider_id : str
@@ -160,5 +173,22 @@ class PatientSchema(BaseModel):
     primary_secondary_insurance : Optional[PrimarySecondaryInsurance] = None
     emergency_contact : Optional[EmergencyContact] = None
     secondary_emergency_contact : Optional[SecondaryEmergencyContact] = None
+    diagnosis_information : Optional[DiagnosisInformation] = None
+
+
+class PatientUpdateSchema(BaseModel):
+    provider_id : Optional[str] = None
+    bed_id : Optional[str] = None
+    personal_information : Optional[PersonalInfo] = None
+    contact_information : Optional[ContactInformation] = None
+    admission_information : Optional[Admission] = None
+    current_address : Optional[CurrentAddress] = None
+    previous_address : Optional[PreviousAddress] = None
+    medicare_information : Optional[medicareInformation] = None
+    medicare_advantage : Optional[MedicareAdvantage] = None
+    primary_secondary_insurance : Optional[PrimarySecondaryInsurance] = None
+    emergency_contact : Optional[EmergencyContact] = None
+    secondary_emergency_contact : Optional[SecondaryEmergencyContact] = None
+    diagnosis_information : Optional[DiagnosisInformation] = None
 
     

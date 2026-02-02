@@ -228,7 +228,7 @@ async def create_provider(
         if await UserDoc.find_one(UserDoc.email == enc_email_det):
             raise HTTPException(400, "Email already exists")
 
-        print("fullname ",full_name)
+        
         user = UserDoc(
             full_name=encrypt_value(ce, dek_id, full_name),
             email=enc_email_det,
@@ -463,6 +463,13 @@ async def get_all_providers(
                 # "phone": decrypt_value(ce, prov.user.phone),
                 "degree": decrypt_value(ce, prov.degree),
                 "speciality": decrypt_value(ce, prov.speciality),
+                "subspeciality": decrypt_value(ce, prov.subspeciality),
+                "npi_no": decrypt_value(ce, prov.npi_no),
+                "taxonomy_code": decrypt_value(ce, prov.taxonomy_code),
+                "license_no": decrypt_value(ce, prov.license_no),
+                "license_state": decrypt_value(ce, prov.license_state),
+                "dea_no": decrypt_value(ce, prov.dea_no),
+                "dea_expiration_date": decrypt_value(ce, prov.dea_expiration_date),
                 "professional_phone": decrypt_value(ce, prov.professional_phone),
                 "rotation_days": rotation_days,
                 "oncall_days": oncall_days,

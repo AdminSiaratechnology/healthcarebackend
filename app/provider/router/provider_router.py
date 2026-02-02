@@ -371,6 +371,7 @@ async def list_providers(
         degree = (profile or {}).get("degree_enum")
         speciality = (profile or {}).get("speciality")
         subspeciality = (profile or {}).get("subspeciality")
+        npi_no = (profile or {}).get("npi_no")
         
         
 
@@ -385,6 +386,7 @@ async def list_providers(
                 degree or "",
                 speciality or "",
                 subspeciality or "",
+                npi_no or "",
                 
             ]).lower()
             ok = all(t in blob for t in q_tokens)
@@ -403,6 +405,7 @@ async def list_providers(
             "degree": degree,
             "speciality": speciality,
             "subspeciality": subspeciality,
+            "npi_no": npi_no,
             "created_at": p.created_at,
             "updated_at": p.updated_at,
         })
