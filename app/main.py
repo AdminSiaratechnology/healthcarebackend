@@ -44,7 +44,7 @@ from app.patients.routers.medical_router import router as patient_medical_router
 from app.clinicalmonitoring.routers.category_router import router as category_router
 from app.clinicalmonitoring.routers.subcategory_router import router as subcategory_router
 from app.clinicalmonitoring.routers.template_builder_router import router as template_builder_router
-from app.schedule.router.scheduler_router import router as scheduler_router
+from app.schedule.router.schedule_router import router as schedule_router
 from app.prescriptions.router.prescription_router import router as prescription_router
 from app.device.router.device_router import router as devices_router
 from app.PatientNotes.routers.notes_router import router as notes_router
@@ -145,7 +145,7 @@ app.include_router(template_builder_router)
 
 # --------------------------- Scheduler ------------------------------------
 
-app.include_router(scheduler_router)
+app.include_router(schedule_router)
 
 
 # --------------------------- Prescription ------------------------------------

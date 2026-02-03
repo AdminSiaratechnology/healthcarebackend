@@ -49,5 +49,9 @@ class PatientDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
         indexes = [
            
             [("is_deleted", 1), ("facility_id.$id", 1)],
+            "facility_id",
+            "provider_id",
+            "bed_id",
+            "status"
             
         ]

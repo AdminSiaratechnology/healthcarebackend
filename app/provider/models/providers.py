@@ -61,6 +61,7 @@ class Provider(Document, AutoDecryptMixin, AutoEncryptMixin):
         indexes = [
             ["created_at", "created_by"],
             [("is_deleted", 1), ("facility_ids.$id", 1)]
+            
 
         ]
         

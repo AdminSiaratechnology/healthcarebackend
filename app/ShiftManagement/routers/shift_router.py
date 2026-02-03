@@ -15,13 +15,6 @@ router = APIRouter(prefix="/shift_management", tags=["Shift Management"])
 
 
 
-def _dec_str(client_encryption, encrypted_val):
-    if not encrypted_val:
-        return None
-    raw = decrypt_value(client_encryption, encrypted_val)
-    return raw.decode() if isinstance(raw, (bytes, bytearray)) else raw
-
-
 @router.post("/create/shift/")
 async def create_shift(
     shift: ShiftManagementSchema,
