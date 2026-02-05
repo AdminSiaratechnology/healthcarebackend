@@ -286,12 +286,28 @@ async def get_all_patients(
                 if patient.diagnosis else None
             )
 
+            address_info = (
+                json.loads(decrypt_value(ce, patient.address_information))
+                if patient.diagnosis else None
+            )
+            insurance_info = (
+                json.loads(decrypt_value(ce, patient.insurance_information))
+                if patient.diagnosis else None
+            )
+            contact_info = (
+                json.loads(decrypt_value(ce, patient.emergency_contact_information))
+                if patient.diagnosis else None
+            )
+
            
             result.append({
                 "id": str(patient.id),
                 "full_name": patient.user_id.full_name_search if patient.user_id else None,
                 "personal_information": personal_info,
                 "admission_information": admission_info,
+                "adrress_information": address_info,
+                "insurance_information": insurance_info,
+                "contact_information": contact_info,
                 "diagnosis_information": diagnosis_info,
                 "facility": {
                     "id": str(patient.facility_id.id),
