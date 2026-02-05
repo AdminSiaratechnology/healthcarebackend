@@ -31,6 +31,8 @@ class ShiftManagementDocs(Document, AutoEncryptMixin, AutoDecryptMixin):
     active_days: Binary | None = None
     description: Binary | None = None
     
+    # 🟢 Plain searchable (NON-PHI)
+    name_search: Annotated[str, Indexed()]
 
     # 🔁 Soft delete
     is_deleted: Annotated[bool, Indexed()] = False
@@ -46,6 +48,7 @@ class ShiftManagementDocs(Document, AutoEncryptMixin, AutoDecryptMixin):
     class Settings:
         name = "shift_managements"
         indexes = [
+        [("facility_id.$id", 1), ("block_name_search", 1)],
         # 🔥 Primary filter index
         [("is_deleted", 1), ("status", 1), ("facility_ids.$id", 1)],
 
