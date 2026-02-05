@@ -14,90 +14,14 @@ import os
 from app.clinicalmonitoring.models.category import CategoryDoc
 from beanie.operators import RegEx
 from typing import Optional
+from beanie.operators import And
 
 router = APIRouter(prefix="/category", tags=["Category"])
 
 
 
-# @router.post("/create/category/")
-# async def create_category(
-#     cat: CategorySchema,
-#     request: Request,
-#     current_user_id: str = Depends(get_current_user_id)
-# ):
-#     try:
-#         ce = getattr(request.app, "client_encryption", None)
-#         if ce is None:
-#             ce = init_encryption()
-#             request.app.client_encryption = ce
-#         dek_id = getattr(request.app, "dek_id", None)
-#         if dek_id is None:
-#             dek_id = ensure_data_key()
-#             request.app.dek_id = dek_id
 
-#         user = await UserDoc.get(current_user_id)
-#         if not user:
-#             raise HTTPException(status_code=404, detail="User not found")
-
-#         # Check for existing category with the same name (deterministic compare)
-#         enc_name_det = encrypt_value_deterministic(ce, dek_id, cat.name)
-       
-#         existing = await CategoryDoc.find_one({"name": enc_name_det})
-        
-#         if not existing:
-#             cats = await CategoryDoc.find({}).to_list()
-#             for c in cats:
-#                 if decrypt_value(ce, c.name) == cat.name:
-#                     existing = c
-#                     break
-            
-#         if existing:
-#             return {"message": "Category already exists", "id": str(existing.id)}
-
-#         enc_name = enc_name_det
-
-#         doc = CategoryDoc(
-#             name=enc_name,
-#             created_by=user,
-#             created_at=datetime.now(timezone.utc),
-#             updated_at=datetime.now(timezone.utc),
-#         )
-#         await doc.insert()
-
-#         try:
-#             await log_audit(
-#                 request=request,
-#                 user_id=str(user.id),
-#                 action="Create",
-#                 resource="Category",
-#                 resource_id=str(doc.id),
-#                 status="success",
-#                 notes="Category created",
-#             )
-#         except Exception:
-#             pass
-
-#         return {"id": str(doc.id)}
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         try:
-#             await log_audit(
-#                 request=request,
-#                 user_id=str(current_user_id),
-#                 action="Create",
-#                 resource="Category",
-#                 resource_id="N/A",
-#                 status="failed",
-#                 notes=str(e),
-#             )
-#         except Exception:
-#             pass
-#         raise HTTPException(status_code=500, detail="Internal Server Error while creating category")
-
-
-
-@router.post("/create/category/")
+@router.post("/create/")
 async def create_category(
     
     payload: CategorySchema,
@@ -197,54 +121,8 @@ async def create_category(
 
 
 
-# @router.get("/get/category/")
-# async def list_categories(
-#     request: Request,
-#     current_user_id: str = Depends(get_current_user_id)
-# ):
-#     ce = getattr(request.app, "client_encryption", None)
-#     if ce is None:
-#         ce = init_encryption()
-#         request.app.client_encryption = ce
 
-#     user = await UserDoc.get(current_user_id)
-#     if not user:
-#         raise HTTPException(status_code=404, detail="User not found")
-
-#     # cats = await CategoryDoc.find({}).to_list()
-#     cats = await CategoryDoc.find(
-#         CategoryDoc.created_by.id == user.id
-#     ).sort("-created_at").to_list()
-#     items = []
-#     for c in cats:
-#         items.append({
-#             "id": str(c.id),
-#             "name": decrypt_value(ce, c.name),
-#             "created_at": c.created_at,
-#             "updated_at": c.updated_at,
-#         })
-
-#     try:
-#         await log_audit(
-#             request=request,
-#             user_id=str(user.id),
-#             action="Read",
-#             resource="Category",
-#             resource_id="list",
-#             status="success",
-#             notes="Categories listed",
-#         )
-#     except Exception:
-#         pass
-
-#     return items
-
-
-
-
-
-
-@router.get("/category/list/")
+@router.get("/list/")
 async def get_all_categories(
     request: Request,
     current_user_id: str = Depends(get_current_user_id),
@@ -372,82 +250,118 @@ async def get_all_categories(
         )
 
 
-
-@router.put("/update/category/{category_id}/")
+@router.put("/update/{category_id}/")
 async def update_category(
     category_id: str,
-    cat: CategorySchema,
+    payload: CategorySchema,
     request: Request,
-    current_user_id: str = Depends(get_current_user_id)
+    current_user_id: str = Depends(get_current_user_id),
 ):
     try:
-        ce = getattr(request.app, "client_encryption", None)
-        if ce is None:
-            ce = init_encryption()
-            request.app.client_encryption = ce
-        dek_id = getattr(request.app, "dek_id", None)
-        if dek_id is None:
-            dek_id = ensure_data_key()
-            request.app.dek_id = dek_id
-
+        # 1️⃣ User
         user = await UserDoc.get(current_user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        doc = await CategoryDoc.get(PydanticObjectId(category_id))
-        if not doc:
-            raise HTTPException(status_code=404, detail="Category not found")
+        # 2️⃣ Encryption
+        ce = getattr(request.app, "client_encryption", None) or init_encryption()
+        request.app.client_encryption = ce
 
-        # Check for existing category with the same name (deterministic compare)
-        enc_name_det = encrypt_value_deterministic(ce, dek_id, cat.name)
-        existing = await CategoryDoc.find_one({"name": enc_name_det, "_id": {"$ne": doc.id}})
-        
-        if not existing:
-            cats = await CategoryDoc.find({}).to_list()
-            for c in cats:
-                if c.id != doc.id and decrypt_value(ce, c.name) == cat.name:
-                    existing = c
-                    break
+        dek_id = getattr(request.app, "dek_id", None) or ensure_data_key()
+        request.app.dek_id = dek_id
+
+        # 3️⃣ Validate ID
+        try:
+            category_obj_id = PydanticObjectId(category_id)
             
-        if existing:
-            return {"message": "Category with this name already exists", "id": str(existing.id)}
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid Category ID")
 
-        doc.name = enc_name_det
-        doc.updated_at = datetime.now(timezone.utc)
-        await doc.save()
+        # 4️⃣ Fetch category (Beanie-correct)
+       
+        category = await CategoryDoc.find_one(
+            CategoryDoc.id == category_obj_id,
+            CategoryDoc.created_by.id == user.id,
+            CategoryDoc.is_deleted == False,
+        )
+        
+        
 
+        if not category:
+            raise HTTPException(status_code=404, detail="category not found")
+
+        # 5️⃣ Normalize name
+        normalized_name_search = payload.name.strip().lower()
+
+        # 6️⃣ Duplicate validation
+        if normalized_name_search != CategoryDoc.name_search:
+            duplicate = await CategoryDoc.find_one(
+                And(
+                    # CategoryDoc.facility_id == campus_block.facility_id,
+                    CategoryDoc.name_search == normalized_name_search,
+                    CategoryDoc.is_deleted == False,
+                    CategoryDoc.id != category.id,
+                )
+            )
+
+            if duplicate:
+                raise HTTPException(
+                    status_code=400,
+                    detail="category name already exists ",
+                )
+
+        # 7️⃣ Encrypt & update
+        encrypted = encrypt_dict(
+            ce,
+            dek_id,
+            {
+                "category_name": payload.name,
+                
+            },
+        )
+
+        category.name = encrypted["category_name"]
+        category.name_search = normalized_name_search
+        category.updated_at = datetime.now(timezone.utc)
+
+        await category.save()
+
+        # Audit log
         try:
             await log_audit(
                 request=request,
                 user_id=str(user.id),
                 action="Update",
                 resource="Category",
-                resource_id=str(doc.id),
+                resource_id=str(category.id),
                 status="success",
-                notes="Category updated",
+                notes="Category updated successfully",
             )
         except Exception:
             pass
 
-        return {"id": str(doc.id)}
+        return {
+            "success": True,
+            "message": "Category updated successfully",
+            "category_id": str(category.id),
+            "updated_at": category.updated_at,
+        }
+
     except HTTPException:
         raise
     except Exception as e:
+        print("❌ Crash:", e)
         try:
             await log_audit(
                 request=request,
                 user_id=str(current_user_id),
                 action="Update",
                 resource="Category",
-                resource_id=category_id,
+                resource_id=str(category_id),
                 status="failed",
                 notes=str(e),
             )
         except Exception:
             pass
-        raise HTTPException(status_code=500, detail="Internal Server Error while updating category")    
-
-
-
-
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
