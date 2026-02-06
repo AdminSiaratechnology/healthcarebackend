@@ -313,6 +313,14 @@ async def get_all_patients(
                     "id": str(patient.facility_id.id),
                     "name": patient.facility_id.facility_name_search,
                 } if patient.facility_id else None,
+                "provider" :{
+                    "id":str(patient.provider_id.id),
+                    "name": patient.provider_id.user.id
+                }if patient.provider_id else None,
+                # "provider": {
+                #     "id": str(patient.provider_id.id),
+                #     "name": patient.provider_id.user.full_name_search,
+                # } if patient.provider_id else None,
                 "created_at": patient.created_at,
                 "updated_at": patient.updated_at,
             })
@@ -649,6 +657,9 @@ async def get_facility_resources(
             })
 
         # 4. Fetch Providers (Linked to this facility)
+
+        # Pateintes list filter by facility ids
+        
         # Providers have facility_ids list or primary_facility_id
         providers = await Provider.find(
              Or(
@@ -661,7 +672,6 @@ async def get_facility_resources(
 
         provider_list = []
         for prov in providers:
-            # Decrypt Name
             first = ""
             last = ""
             try:
@@ -680,11 +690,90 @@ async def get_facility_resources(
                 "speciality": decrypt_value(ce, prov.speciality).strip('"') if prov.speciality else None
             })
 
+        patients = await PatientDoc.find(
+            PatientDoc.facility_id.id == ObjectId(facility_id),
+            PatientDoc.is_deleted == False,
+            fetch_links=True
+        ).to_list()
+
+        patient_list = []
+        for p in patients:
+            pname = None
+            if p.user_id:
+                try:
+                    if getattr(p.user_id, "full_name_search", None):
+                        pname = p.user_id.full_name_search
+                    elif getattr(p.user_id, "full_name", None):
+                        pname = decrypt_value(ce, p.user_id.full_name).strip('"')
+                    
+                except:
+                    pname = None
+            bnum = None
+            if p.bed_id:
+                try:
+                    bnum = getattr(p.bed_id, "bed_no_search", None)
+                    if not bnum and getattr(p.bed_id, "bed_number", None):
+                        bnum = decrypt_value(ce, p.bed_id.bed_number)
+                except:
+                    bnum = None
+            prov_name = None
+            if p.provider_id:
+                try:
+                    f = decrypt_value(ce, p.provider_id.first_name).strip('"') if p.provider_id.first_name else ""
+                    l = decrypt_value(ce, p.provider_id.last_name).strip('"') if p.provider_id.last_name else ""
+                    prov_name = f"{f} {l}".strip()
+                except:
+                    prov_name = None
+            def _dec_json(binval):
+                try:
+                    if not binval:
+                        return None
+                    s = decrypt_value(ce, binval)
+                    try:
+                        return json.loads(s) if isinstance(s, str) else s
+                    except:
+                        return s
+                except:
+                    return None
+            user_email = None
+            user_phone = None
+            if p.user_id:
+                try:
+                    user_email = getattr(p.user_id, "email_search", None)
+                    if not user_email and getattr(p.user_id, "email", None):
+                        user_email = decrypt_value(ce, p.user_id.email).strip('"')
+                except:
+                    user_email = None
+                try:
+                    user_phone = getattr(p.user_id, "phone_search", None)
+                    if not user_phone and getattr(p.user_id, "phone", None):
+                        user_phone = decrypt_value(ce, p.user_id.phone).strip('"')
+                except:
+                    user_phone = None
+            patient_list.append({
+                "id": str(p.id),
+                "name": pname,
+                "bed_id": str(p.bed_id.id) if p.bed_id else None,
+                "bed_number": bnum,
+                "provider_id": str(p.provider_id.id) if p.provider_id else None,
+                "provider_name": prov_name,
+                "user_email": user_email,
+                "user_phone": user_phone,
+                "bed_status": getattr(p.bed_id, "bed_status_search", None) if p.bed_id else None,
+                "personal_information": _dec_json(p.personal_information),
+                "admission_information": _dec_json(p.admisson_information),
+                "address_information": _dec_json(p.address_information),
+                "insurance_information": _dec_json(p.insurance_information),
+                "emergency_contact_information": _dec_json(p.emergency_contact_information),
+                "diagnosis": _dec_json(p.diagnosis)
+            })
+
         return {
             "success": True,
             "facility_id": facility_id,
             "beds": bed_list,
-            "providers": provider_list
+            "providers": provider_list,
+            "patients": patient_list
         }
 
     except HTTPException:
