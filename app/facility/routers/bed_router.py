@@ -305,114 +305,13 @@ async def get_facility_beds(
 
 
 
-
-# @router.get("/get/bed/by-room/{room_id}/")
-# async def get_beds_by_room(
-#     room_id: str,
-#     request: Request,
-#     current_user_id: str = Depends(get_current_user_id),
-#     page : int = Query(1, ge=1),
-#     page_size : int = Query(10, ge=1),
-#     search: str | None = Query(None, description="Search by bed ID or designation"),
-# ):
-#     user = await UserDoc.get(current_user_id)
-#     if not user:
-#         raise HTTPException(status_code=404, detail="User not found")
-
-#     room_obj = None
-#     try:
-#         room_obj_id = PydanticObjectId(room_id)
-#         room_obj = await FacilityRooms.get(room_obj_id)
-#     except Exception:
-#         pass
-
-#     if room_obj is None:
-#         room_obj = await FacilityRooms.get(room_id)
-#     if not room_obj:
-#         raise HTTPException(status_code=404, detail="Room not found")
-
-#     ce = request.app.client_encryption
-
-#     beds_by_link = await Beds.find(Beds.room_id.id == room_obj.id).to_list()
-#     beds_by_str = await Beds.find(Beds.room_id == str(room_obj.id)).to_list()
-
-#     seen = set()
-#     beds = []
-#     for b in beds_by_link + beds_by_str:
-#         if str(b.id) in seen:
-#             continue
-#         seen.add(str(b.id))
-#         beds.append(b)
-
-#     async def _safe_room_id(bed_doc):
-#         if not bed_doc.room_id:
-#             return None
-#         if hasattr(bed_doc.room_id, "fetch"):
-#             try:
-#                 return str((await bed_doc.room_id.fetch()).id)
-#             except Exception:
-#                 pass
-#         return str(getattr(bed_doc.room_id, "id", bed_doc.room_id))
-    
-#     results = []
-
-#     for b in beds:
-#         bed_id = _decrypt_value(ce, b.bed_id)
-#         designation = _decrypt_value(ce, b.designation)
-#         if search:
-#             search_lower = search.lower()
-#             if (
-#                 search_lower not in str(bed_id or "").lower()
-#                 and search_lower not in str(designation or "").lower()
-#             ):
-#                 continue
-#         results.append({
-#         "id": str(b.id),
-#         "bed_id": bed_id,
-#         "designation": designation,
-#         "status": _decrypt_value(ce, b.status),
-#         "bariatric": _decrypt_value(ce, b.bariatric),
-#         "room_id": await _safe_room_id(b),
-#         "last_sanitized": b.last_sanitized,
-#         "bed_policy": _decrypt_value(ce, b.bed_policy),
-#         "created_at": b.created_at,
-#         "updated_at": b.updated_at,
-#     })
-        
-#     total = len(results)
-#     start = (page - 1) * page_size
-#     end = start + page_size
-#     paginated_docs = results[start:end]
-
+   
     
 
-#     try:
-#         await log_audit(
-#             request=request,
-#             user_id=str(user.id),
-#             action="Read",
-#             resource="Bed",
-#             resource_id=str(room_obj.id),
-#             status="success",
-#             notes="Beds fetched successfully by room",
-#         )
-#     except Exception:
-#         pass
-
-#     return {
-#         "items": paginated_docs,
-#         "pagination" : {
-#             "page": page,
-#             "page_size": page_size,
-#             "total_items": total,
-#             "total_pages": (total + page_size - 1) // page_size,
-#         }
-#     }
-
-
-@router.put("/update/{bed_id}/")
+@router.put("/update/{bed_id}/{facility_id}/")
 async def update_facility_bed(
     bed_id: str,
+    facility_id : str,
     payload: Bed,
     request: Request,
     current_user_id: str = Depends(get_current_user_id),
@@ -436,17 +335,34 @@ async def update_facility_bed(
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid Bed ID")
 
-        # 4️⃣ Fetch bed (ownership + active)
+        # 4️⃣ Fetch bed
         bed = await Beds.find_one(
-            {
-                "_id": bed_obj_id,
-                "created_by.$id": user.id,
-                "is_deleted": False,
-            }
+            Beds.id == bed_obj_id,
+            Beds.created_by.id == user.id,
+            Beds.is_deleted == False,
         )
 
         if not bed:
             raise HTTPException(status_code=404, detail="Bed not found")
+        
+        try:
+            facility_obj_id = ObjectId(facility_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid Facility ID")
+        
+        facility = await Facility.find_one(
+            Facility.id == facility_obj_id,
+            Facility.is_deleted == False,
+            Facility.created_by.id == user.id,
+        )
+
+        if not facility:
+            raise HTTPException(
+                status_code=404,
+                detail="Facility not found or access denied",
+            )
+
+        bed.facility_id = facility
 
         # 5️⃣ Validate room (if changed)
         if payload.room_id:
@@ -456,11 +372,9 @@ async def update_facility_bed(
                 raise HTTPException(status_code=400, detail="Invalid Room ID")
 
             room = await FacilityRooms.find_one(
-                {
-                    "_id": room_obj_id,
-                    "facility_id.$id": bed.facility_id.ref.id,
-                    "is_deleted": False,
-                }
+                FacilityRooms.id == room_obj_id,
+                FacilityRooms.facility_id.id == facility.id,
+                FacilityRooms.is_deleted == False,
             )
 
             if not room:
@@ -471,18 +385,16 @@ async def update_facility_bed(
 
             bed.room_id = room
 
-        # 6️⃣ Duplicate bed number check (ONLY if changed)
+        # 6️⃣ Duplicate bed number check
         if payload.bed_number:
             normalized_bed_no = payload.bed_number.strip().lower()
 
             if normalized_bed_no != bed.bed_no_search:
                 duplicate = await Beds.find_one(
-                    {
-                        "facility_id.$id": bed.facility_id.ref.id,
-                        "bed_no_search": normalized_bed_no,
-                        "is_deleted": False,
-                        "_id": {"$ne": bed.id},
-                    }
+                    Beds.facility_id.id == facility.id,
+                    Beds.bed_no_search == normalized_bed_no,
+                    Beds.is_deleted == False,
+                    Beds.id != bed.id,
                 )
 
                 if duplicate:
@@ -496,11 +408,9 @@ async def update_facility_bed(
                     ce, dek_id, payload.bed_number
                 )
 
-        # 7️⃣ Update other fields (optional)
+        # 7️⃣ Update fields
         if payload.designation is not None:
-            bed.designation = encrypt_value(
-                ce, dek_id, payload.designation
-            )
+            bed.designation = encrypt_value(ce, dek_id, payload.designation)
 
         if payload.bed_status is not None:
             bed.bed_status_search = payload.bed_status.value.lower()
@@ -509,19 +419,34 @@ async def update_facility_bed(
             )
 
         if payload.bariatric is not None:
-            bed.bariatric = encrypt_value(
-                ce, dek_id, payload.bariatric
-            )
+            bed.bariatric = encrypt_value(ce, dek_id, payload.bariatric)
 
         if payload.move_policy is not None:
-            bed.bed_policy = encrypt_value(
-                ce, dek_id, payload.move_policy
-            )
+            bed.bed_policy = encrypt_value(ce, dek_id, payload.move_policy)
 
         # 8️⃣ Timestamp
         bed.updated_at = datetime.now(timezone.utc)
-
         await bed.save()
+
+        # ----------------------------
+        # 9️⃣ Audit Log (SUCCESS)
+        # ----------------------------
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(user.id),
+                action="Update",
+                resource="Facility Beds",
+                resource_id=str(bed.id),
+                status="success",
+                notes=(
+                    f"Facility Bed updated | "
+                    f"bed_id={bed.id}, "
+                    
+                ),
+            )
+        except Exception:
+            pass
 
         return {
             "success": True,
@@ -537,100 +462,3 @@ async def update_facility_bed(
             status_code=500,
             detail="Internal Server Error while updating bed",
         )
-
-
-# @router.put("/update/bed/{bed_id}/")
-# async def update_bed(
-#     bed_id: str,
-#     bed: Bed,
-#     request: Request,
-#     current_user_id: str = Depends(get_current_user_id),
-# ):
-    
-#     ce = getattr(request.app, "client_encryption", None)
-#     if ce is None:
-#         ce = init_encryption()
-#         request.app.client_encryption = ce
-#     dek_id = getattr(request.app, "dek_id", None)
-#     if dek_id is None:
-#         dek_id = ensure_data_key()
-#         request.app.dek_id = dek_id
-#     def enc_or_none(val):
-#         return encrypt_value(ce, dek_id, val) if val is not None else None
-
-#     user = await UserDoc.get(current_user_id)
-#     if not user:
-#         raise HTTPException(status_code=404, detail="User not found")
-#     try:
-#         bed_obj_id = PydanticObjectId(bed_id)
-#     except Exception:
-#         raise HTTPException(status_code=400, detail="Invalid Bed ID format")
-#     bed_doc = await Beds.get(bed_obj_id)
-#     if not bed_doc:
-#         raise HTTPException(status_code=404, detail="Bed not found")
-#     update_data = bed.model_dump(exclude_unset=True)
-#     if not update_data:
-#         raise HTTPException(status_code=400, detail="No fields provided for update")
-    
-#     current_bed_id = _decrypt_value(ce, bed_doc.bed_id)
-#     current_designation = _decrypt_value(ce, bed_doc.designation)
-#     current_status = _decrypt_value(ce, bed_doc.status)
-#     current_bariatric = _decrypt_value(ce, bed_doc.bariatric)
-#     current_last_sanitized = _decrypt_value(ce, bed_doc.last_sanitized)
-#     current_bed_policy = _decrypt_value(ce, bed_doc.bed_policy)
-#     room_id = bed.room_id
-
-#     new_bed_id = bed.bed_id if "bed_id" in update_data else current_bed_id
-#     new_designation = bed.designation if "designation" in update_data else current_designation
-#     new_status = bed.status if "status" in update_data else current_status
-#     new_bariatric = bed.bariatric if "status" in update_data else current_bariatric
-#     new_bed_policy = bed.move_policy if "status" in update_data else current_bed_policy
-
-#     print("status",new_status)
-
-#     bed_doc.bed_id = enc_or_none(new_bed_id)
-    
-#     bed_doc.designation = enc_or_none(new_designation)
-#     bed_doc.status = enc_or_none(new_status)
-#     bed_doc.bariatric = enc_or_none(new_bariatric)
-#     bed_doc.bed_policy = enc_or_none(new_bed_policy)
-#     bed_doc.updated_at = datetime.now(timezone.utc)
-
-#     room = await FacilityRooms.get(PydanticObjectId(room_id))
-#     if not room:
-#         raise HTTPException(status_code=404, detail="Room not found")
-#     bed_doc.room_id = room
-#     await bed_doc.save()
-#     try:
-#         await log_audit(
-#             request=request,
-#             user_id=str(user.id),
-#             action="Update",
-#             resource="Facility Bed",
-#             resource_id=str(bed_doc.id),
-#             status="success",
-#             notes="Facility Bed updated successfully",
-#         )
-#     except Exception:
-#         pass
-
-#     return {
-#         "success": True,
-#         "id": str(bed_doc.id),
-#         "bed_id": new_bed_id,
-#         "designation": new_designation,
-#         "status": new_status,
-#         "bariatric": new_bariatric,
-#         "policy": new_bed_policy,
-#         "created_at": bed_doc.created_at,
-#         "updated_at": bed_doc.updated_at,
-#     }
-
-   
-
-   
-    
-
-   
-
-   

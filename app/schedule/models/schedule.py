@@ -15,7 +15,7 @@ class ScheduleDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
     # 🔗 Relations
     facility_id: Link[Facility] = Field(..., description="Reference to the associated facility")
     provider_id : Link["Provider"]
-    patient_id : Link[PatientDoc] = Field(..., description="Reference to the Patient")
+    # patient_id : Link[PatientDoc] = Field(..., description="Reference to the Patient")
     created_by: Link[UserDoc] | None = None
     deleted_by: Link[UserDoc] | None = None
 
