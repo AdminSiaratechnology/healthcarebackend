@@ -352,7 +352,7 @@ async def update_facility_bed(
         
         facility = await Facility.find_one(
             Facility.id == facility_obj_id,
-            Facility.is_deleted == False,
+            # Facility.is_deleted == False,
             Facility.created_by.id == user.id,
         )
 
