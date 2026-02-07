@@ -911,6 +911,7 @@ async def get_my_provider_schedules(
                     shift_time = json.loads(decrypted_shift)
                 except Exception:
                     shift_time = decrypted_shift
+           
 
             result.append({
                 "id": str(sch.id),
@@ -934,7 +935,7 @@ async def get_my_provider_schedules(
             "total_pages": (total + page_size - 1) // page_size,
             "count": len(result),
             "total": total,
-            "data": result,
+            "schedules": result,
         }
 
     except HTTPException:
@@ -942,3 +943,4 @@ async def get_my_provider_schedules(
     except Exception as e:
         print("❌ PROVIDER SCHEDULES CRASH:", e)
         raise HTTPException(status_code=500, detail="Internal Server Error")
+

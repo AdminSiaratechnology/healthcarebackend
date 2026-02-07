@@ -299,10 +299,46 @@ async def get_all_patients(
                 if patient.diagnosis else None
             )
 
+            p_full_name = None
+            if patient.user_id:
+                p_full_name = getattr(patient.user_id, "full_name_search", None)
+                if not p_full_name and getattr(patient.user_id, "full_name", None):
+                    try:
+                        p_full_name = decrypt_value(ce, patient.user_id.full_name).strip('"')
+                    except:
+                        p_full_name = None
+            if not p_full_name and personal_info:
+                try:
+                    fn = (personal_info.get("first_name") or "").strip()
+                    ln = (personal_info.get("last_name") or "").strip()
+                    if fn or ln:
+                        p_full_name = f"{fn} {ln}".strip()
+                except:
+                    pass
+
+            user_email = None
+            user_phone = None
+            if patient.user_id:
+                user_email = getattr(patient.user_id, "email_search", None)
+                if not user_email and getattr(patient.user_id, "email", None):
+                    try:
+                        user_email = decrypt_value(ce, patient.user_id.email).strip('"')
+                    except:
+                        user_email = None
+                user_phone = getattr(patient.user_id, "phone_search", None)
+                if not user_phone and getattr(patient.user_id, "phone", None):
+                    try:
+                        user_phone = decrypt_value(ce, patient.user_id.phone).strip('"')
+                    except:
+                        user_phone = None
+
            
             result.append({
                 "id": str(patient.id),
-                "full_name": patient.user_id.full_name_search if patient.user_id else None,
+                "full_name": p_full_name,
+                "user_id": (str(patient.user_id.id) if patient.user_id else None),
+                "user_email": user_email,
+                "user_phone": user_phone,
                 "personal_information": personal_info,
                 "admission_information": admission_info,
                 "adrress_information": address_info,
@@ -313,18 +349,48 @@ async def get_all_patients(
                     "id": str(patient.facility_id.id),
                     "name": patient.facility_id.facility_name_search,
                 } if patient.facility_id else None,
-                "provider" :{
-                    "id":str(patient.provider_id.id),
-                    "name": patient.provider_id.user.id
-                }if patient.provider_id else None,
-                # "provider": {
-                #     "id": str(patient.provider_id.id),
-                #     "name": patient.provider_id.user.full_name_search,
-                # } if patient.provider_id else None,
+                
+              "provider": (
+                {
+                    "id": str(patient.provider_id.id),
+                    "name": (
+                        f"{(decrypt_value(ce, patient.provider_id.first_name).strip('\"') if patient.provider_id.first_name else '')} {(decrypt_value(ce, patient.provider_id.last_name).strip('\"') if patient.provider_id.last_name else '')}".strip()
+                    ),
+                    "user_full_name": (
+                        getattr(patient.provider_id.user, "full_name_search", None)
+                        if patient.provider_id.user else None
+                    ) if patient.provider_id else None
+                } if patient.provider_id else None
+              ),
+              "bed": (
+                {
+                    "id": str(patient.bed_id.id),
+                    "bed_number": (
+                        patient.bed_id.bed_no_search
+                        if getattr(patient.bed_id, "bed_no_search", None) else (
+                            decrypt_value(ce, patient.bed_id.bed_number)
+                            if getattr(patient.bed_id, "bed_number", None) else None
+                        )
+                    ),
+                    "status": getattr(patient.bed_id, "bed_status_search", None),
+                    "room_id": (
+                        str(patient.bed_id.room_id.id)
+                        if getattr(patient.bed_id, "room_id", None) and patient.bed_id.room_id else None
+                    ),
+                    "room_number": (
+                        getattr(patient.bed_id.room_id, "room_no_search", None)
+                        if getattr(patient.bed_id, "room_id", None) and patient.bed_id.room_id else None
+                    ),
+                    "designation": (
+                        decrypt_value(ce, patient.bed_id.designation)
+                        if getattr(patient.bed_id, "designation", None) else None
+                    )
+                } if patient.bed_id else None
+              ),
+
                 "created_at": patient.created_at,
                 "updated_at": patient.updated_at,
             })
-
 
         return {
             "success": True,

@@ -7,6 +7,7 @@ from app.encryption.decrypt_mixin import AutoDecryptMixin
 from app.encryption.encrypt_mixin import AutoEncryptMixin
 from app.facility.models.facility import Facility
 from app.provider.models.providers import Provider
+from app.patients.models.patients import PatientDoc
 from typing_extensions import Annotated
 
 
@@ -14,6 +15,7 @@ class ScheduleDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
     # 🔗 Relations
     facility_id: Link[Facility] = Field(..., description="Reference to the associated facility")
     provider_id : Link["Provider"]
+    patient_id : Link[PatientDoc] = Field(..., description="Reference to the Patient")
     created_by: Link[UserDoc] | None = None
     deleted_by: Link[UserDoc] | None = None
 
@@ -46,7 +48,9 @@ class ScheduleDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
             # Single indexes for frequent queries
             "facility_id",
             "provider_id",
-            "status"
+            "status",
+            "patient_id",
+            "created_by"
 
             
         ]
