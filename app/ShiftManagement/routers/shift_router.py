@@ -231,7 +231,7 @@ async def get_all_shifts(
                 "active_days": decrypt_value(ce, shift.active_days),
                 "description": decrypt_value(ce, shift.description),
                 "facility_ids": [str(f.id) for f in shift.facility_ids] if shift.facility_ids else [],
-                # "facility_names": [f.facility_name_search for f in shift.facility_ids] if shift.facility_ids else [], # Assuming facility has this
+                "facility_names": [f.facility_name_search for f in shift.facility_ids] if shift.facility_ids else [], # Assuming facility has this
                 "status": shift.status,
                 "created_at": shift.created_at,
                 "updated_at": shift.updated_at,
