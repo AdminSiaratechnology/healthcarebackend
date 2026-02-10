@@ -13,9 +13,6 @@ from app.encryption.encryption import encrypt_value, decrypt_value,init_encrypti
 from app.utils.audit import log_audit
 from app.schemas.facilities.bed import Bed
 from beanie import PydanticObjectId
-
-import json
-import os
 from app.facility.models.beds import Beds
 from beanie.operators import In,RegEx,Or
 

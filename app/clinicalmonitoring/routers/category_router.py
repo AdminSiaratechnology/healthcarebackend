@@ -328,7 +328,7 @@ async def get_all_categories(
             fetch_links=True
         ).to_list()
        
-
+        
         # --------------------------------------------------
         # 7️⃣ Group subcategories by category_id
         # --------------------------------------------------
