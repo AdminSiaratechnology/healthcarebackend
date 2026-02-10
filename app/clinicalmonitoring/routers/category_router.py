@@ -340,6 +340,8 @@ async def get_all_categories(
             subcategory_map.setdefault(cat_id, []).append({
                 "id": str(sub.id),
                 "name": decrypt_value(ce, sub.name),
+                "content": decrypt_value(ce, sub.content),
+                "description": decrypt_value(ce, sub.description),
                 "status": sub.status,
                 "created_at": sub.created_at,
                 "updated_at": sub.updated_at,
