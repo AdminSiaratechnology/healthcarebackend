@@ -293,7 +293,7 @@ async def update_campus_block(
         campus_block = await CampusBlock.find_one(
             CampusBlock.id == block_obj_id,
             CampusBlock.created_by.id == user.id,
-            CampusBlock.facility_id.id == facility.id,
+            # CampusBlock.facility_id.id == facility.id,
             CampusBlock.is_deleted == False,
         )
 

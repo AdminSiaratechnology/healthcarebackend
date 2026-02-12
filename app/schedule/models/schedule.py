@@ -15,7 +15,7 @@ class ScheduleDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
     # 🔗 Relations
     facility_id: Link[Facility] = Field(..., description="Reference to the associated facility")
     provider_id : Link["Provider"]
-    # patient_id : Link[PatientDoc] = Field(..., description="Reference to the Patient")
+    patient_id : Link[PatientDoc] = Field(..., description="Reference to the Patient")
     created_by: Link[UserDoc] | None = None
     deleted_by: Link[UserDoc] | None = None
 
@@ -31,7 +31,7 @@ class ScheduleDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
     is_deleted: Annotated[bool, Indexed()] = False
     deleted_at: datetime | None = None
 
-    status: Annotated[str, Indexed()] = "active"
+    status: Annotated[str, Indexed()] = "scheduled"
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
