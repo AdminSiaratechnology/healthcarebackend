@@ -15,7 +15,7 @@ class DocumentationWorkflow(BaseModel):
 
 
 class ChargeCaptureEnum(str, Enum):
-    Professional_Fee = "Perofessional Fee Only"
+    Professional_Fee = "Professional Fee Only"
     Facility_Fee = "Facility Fee Only"
     both = "Both Professional and Facility"
     
