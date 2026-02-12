@@ -21,8 +21,8 @@ class ScheduleDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
 
 
     # 🔐 Encrypted
-    selected_date : Binary | None = None
-    shift_time :Binary | None = None
+    schedule_date : Binary | None = None
+    slot_time :Binary | None = None
     department : Binary | None = None
     is_create_recurring_shift : Binary | None = None
 

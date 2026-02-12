@@ -25,9 +25,6 @@ router = APIRouter(prefix="/schedule", tags=["Schedule"])
 
 
 
-
-
-
 @router.post("/create/")
 async def create_schedule(
     payload: ScheduleSchema,

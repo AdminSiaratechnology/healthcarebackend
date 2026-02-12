@@ -10,6 +10,7 @@ class AccreditationsBodyEnum(str, Enum):
     other = "Other"
 
 class AccreditationStatusEnum(str, Enum):
+    Inactive = "Inactive"
     Active = "Active"
     Pending = "Pending"
     Expired = "Expired"

@@ -352,6 +352,19 @@ async def get_all_templates(
         template_ids = [t.id for t in templates]
 
         if not template_ids:
+
+            try:
+                await log_audit(
+                    request=request,
+                    user_id=str(user.id),
+                    action="READ",
+                    resource="template_builder",
+                    resource_id="List",
+                    status="success",
+                )
+            except Exception:
+                pass
+
             return {
                 "success": True,
                 "total": 0,
@@ -359,6 +372,8 @@ async def get_all_templates(
                 "limit": limit,
                 "data": []
             }
+
+           
 
         # 🔹 7️⃣ Fetch with links
         templates_with_links = await TemplateBuilderDoc.find(
