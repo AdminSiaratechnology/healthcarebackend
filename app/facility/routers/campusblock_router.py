@@ -68,12 +68,13 @@ async def create_campus_block(
                 detail="Campus block with this name already exists in this facility"
             )
 
+
         # 7️⃣ Random encryption (actual storage)
         encrypted = encrypt_dict(
             ce,
             dek_id,
             {
-                "department_code": payload.block_code,
+                "block_code": payload.block_code,
                 "block_name": payload.block_name,
             }
         )
