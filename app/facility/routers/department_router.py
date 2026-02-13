@@ -228,6 +228,7 @@ async def get_all_campus_blocks(
                 "department_name": decrypt_value(ce, dept.department_name),
                 "department_code": decrypt_value(ce, dept.code),
                 "department_type": decrypt_value(ce, dept.type),
+                "description" : decrypt_value(ce, dept.department_name),
                 "facility_id": str(dept.facility_id.id) if dept.facility_id else None,
                 "facility_name": (
                     dept.facility_id.facility_name_search
