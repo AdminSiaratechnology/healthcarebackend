@@ -271,40 +271,15 @@ async def update_campus_block(
             raise HTTPException(status_code=400, detail="Invalid Campus Block ID")
 
         # 4️⃣ Fetch block (Beanie-correct)
-
-        try:
-            facility_obj_id = ObjectId(facility_id)
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid Facility ID")
-        
-        facility = await Facility.find_one(
-            Facility.id == facility_obj_id,
-            # Facility.is_deleted == False,
-            Facility.created_by.id == user.id,
-        )
-
-        if not facility:
-            raise HTTPException(
-                status_code=404,
-                detail="Facility not found or access denied",
-            )
-        
-
-       
         campus_block = await CampusBlock.find_one(
             CampusBlock.id == block_obj_id,
             CampusBlock.created_by.id == user.id,
-            # CampusBlock.facility_id.id == facility.id,
+            CampusBlock.facility_id.id == facility_obj_id,
             CampusBlock.is_deleted == False,
         )
 
-        
-        
-
-        
-
         if not campus_block:
-            raise HTTPException(status_code=404, detail="Campus block not found")
+            raise HTTPException(status_code=404, detail="Campus block not found in this facility")
         
                
 

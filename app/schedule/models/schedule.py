@@ -13,7 +13,7 @@ from typing import Optional
 from pymongo import IndexModel, ASCENDING
 
 
-class ScheduleDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
+class ScheduleDoc(Document):
     # 🔗 Relations
     facility_id: Link[Facility] = Field(..., description="Facility reference")
     provider_id: Link[Provider] = Field(..., description="Provider reference")
@@ -24,19 +24,20 @@ class ScheduleDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
     rescheduled_from: Optional[Link["ScheduleDoc"]] = None
 
     # 📅 Scheduling
-    schedule_date: date
-    slot_time: time
+    schedule_date: str
+    slot_time: str
 
     # 🔐 Encrypted Fields
-    department: Optional[Binary] = None
-    is_create_recurring_shift: Optional[Binary] = None
+    # department: Optional[Binary] = None
+    # is_create_recurring_shift: Optional[Binary] = None
 
     # 🔁 Soft delete
     is_deleted: Annotated[bool, Indexed()] = False
     deleted_at: Optional[datetime] = None
 
     # 📌 Status
-    status: Annotated[str, Indexed()] = "scheduled"
+
+    status: Annotated[str, Indexed()] = "scheduled" # scheduled / completed / cancelled / rescheduled
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -76,6 +77,8 @@ class ScheduleDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
 class ProviderAssignmentHistory(Document):
     schedule_id: Link[ScheduleDoc] = Field(..., description="Schedule reference")
     provider_id: Link[Provider] = Field(..., description="Provider reference")
+    patient_id: Link[PatientDoc] = Field(..., description="Patient reference")
+
 
     assigned_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     unassigned_at: Optional[datetime] = None
