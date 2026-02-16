@@ -1023,7 +1023,8 @@ async def single_providers_with_facilities_patients(
         provider = await Provider.get(prov_oid, fetch_links=True)
         if not provider:
             raise HTTPException(status_code=404, detail="Provider not found")
-
+        if provider.created_by and provider.created_by.id != user.id:
+            raise HTTPException(status_code=403, detail="Not allowed to view this provider")
         ce = getattr(request.app, "client_encryption", None)
         if not ce or isinstance(ce, str):
             ce = init_encryption()
@@ -1047,6 +1048,11 @@ async def single_providers_with_facilities_patients(
             getattr(getattr(provider, "user", None), "full_name_search", None) or None
         )
 
+        facilities = []
+        fac_links = provider.facility_ids or []
+        if provider.primary_facility_id and provider.primary_facility_id not in fac_links:
+            fac_links = [provider.primary_facility_id] + fac_links
+
         def _dec_json(binval):
             try:
                 if not binval:
@@ -1058,95 +1064,90 @@ async def single_providers_with_facilities_patients(
                     return s
             except Exception:
                 return None
-        # Fetch all patients assigned to this provider, with their facilities
-        patients_for_provider = await PatientDoc.find(
-            PatientDoc.provider_id.id == provider.id,
-            PatientDoc.is_deleted == False,
-            fetch_links=True,
-        ).to_list()
 
-        facilities_map = {}
-        for p in patients_for_provider:
-            fac = getattr(p, "facility_id", None)
-            if not fac:
-                continue
-            fid = str(fac.id)
-            if fid not in facilities_map:
-                facilities_map[fid] = {"facility": fac, "patients": []}
+        # Har facility ke andar us facility ke jitne patients hain (regardless of provider)
+        for fac in fac_links:
+            try:
+                patients = await PatientDoc.find(
+                    PatientDoc.facility_id.id == fac.id,
+                    PatientDoc.is_deleted == False,
+                    fetch_links=True,
+                ).to_list()
+            except Exception:
+                patients = []
 
-            p_name = None
-            if p.user_id:
-                p_name = getattr(p.user_id, "full_name_search", None)
-                if not p_name and getattr(p.user_id, "full_name", None):
+            patients_list = []
+            for p in patients:
+                p_name = None
+                if p.user_id:
+                    p_name = getattr(p.user_id, "full_name_search", None)
+                    if not p_name and getattr(p.user_id, "full_name", None):
+                        try:
+                            p_name = decrypt_value(ce, p.user_id.full_name).strip('"')
+                        except Exception:
+                            p_name = None
+
+
+                if not p_name and p.personal_information:
                     try:
-                        p_name = decrypt_value(ce, p.user_id.full_name).strip('"')
+                        pi = decrypt_value(ce, p.personal_information)
+                        try:
+                            pi_obj = json.loads(pi) if isinstance(pi, str) else pi
+                        except Exception:
+                            pi_obj = {}
+                        fn = (pi_obj.get("first_name") or "").strip()
+                        ln = (pi_obj.get("last_name") or "").strip()
+                        p_name = f"{fn} {ln}".strip() if (fn or ln) else None
                     except Exception:
                         p_name = None
 
-            if not p_name and p.personal_information:
-                try:
-                    pi = decrypt_value(ce, p.personal_information)
+                user_email = None
+                user_phone = None
+                if p.user_id:
+                    user_email = getattr(p.user_id, "email_search", None)
+                    if not user_email and getattr(p.user_id, "email", None):
+                        try:
+                            user_email = decrypt_value(ce, p.user_id.email).strip('"')
+                        except Exception:
+                            user_email = None
+                    user_phone = getattr(p.user_id, "phone_search", None)
+                    if not user_phone and getattr(p.user_id, "phone", None):
+                        try:
+                            user_phone = decrypt_value(ce, p.user_id.phone).strip('"')
+                        except Exception:
+                            user_phone = None
+
+                assigned_provider_name = None
+                if p.provider_id:
                     try:
-                        pi_obj = json.loads(pi) if isinstance(pi, str) else pi
+                        pf = decrypt_value(ce, p.provider_id.first_name).strip('"') if p.provider_id.first_name else ""
+                        pl = decrypt_value(ce, p.provider_id.last_name).strip('"') if p.provider_id.last_name else ""
+                        assigned_provider_name = f"{pf} {pl}".strip()
                     except Exception:
-                        pi_obj = {}
-                    fn = (pi_obj.get("first_name") or "").strip()
-                    ln = (pi_obj.get("last_name") or "").strip()
-                    p_name = f"{fn} {ln}".strip() if (fn or ln) else None
-                except Exception:
-                    p_name = None
+                        assigned_provider_name = None
 
-            user_email = None
-            user_phone = None
-            if p.user_id:
-                user_email = getattr(p.user_id, "email_search", None)
-                if not user_email and getattr(p.user_id, "email", None):
-                    try:
-                        user_email = decrypt_value(ce, p.user_id.email).strip('"')
-                    except Exception:
-                        user_email = None
-                user_phone = getattr(p.user_id, "phone_search", None)
-                if not user_phone and getattr(p.user_id, "phone", None):
-                    try:
-                        user_phone = decrypt_value(ce, p.user_id.phone).strip('"')
-                    except Exception:
-                        user_phone = None
+                patients_list.append(
+                    {
+                        "id": str(p.id),
+                        "name": p_name,
+                        "user_email": user_email,
+                        "user_phone": user_phone,
+                        "provider_id": str(p.provider_id.id) if p.provider_id else None,
+                        "provider_name": assigned_provider_name,
+                        "facility_id": str(fac.id),
+                        "personal_information": _dec_json(p.personal_information),
+                        "admission_information": _dec_json(p.admisson_information),
+                        "address_information": _dec_json(p.address_information),
+                        "insurance_information": _dec_json(p.insurance_information),
+                        "diagnosis_information": _dec_json(p.diagnosis),
+                        "created_at": p.created_at,
+                        "updated_at": p.updated_at,
+                    }
+                )
 
-            assigned_provider_name = None
-            if p.provider_id:
-                try:
-                    pf = decrypt_value(ce, p.provider_id.first_name).strip('"') if p.provider_id.first_name else ""
-                    pl = decrypt_value(ce, p.provider_id.last_name).strip('"') if p.provider_id.last_name else ""
-                    assigned_provider_name = f"{pf} {pl}".strip()
-                except Exception:
-                    assigned_provider_name = None
-
-            facilities_map[fid]["patients"].append(
-                {
-                    "id": str(p.id),
-                    "name": p_name,
-                    "user_email": user_email,
-                    "user_phone": user_phone,
-                    "provider_id": str(p.provider_id.id) if p.provider_id else None,
-                    "provider_name": assigned_provider_name,
-                    "facility_id": fid,
-                    "personal_information": _dec_json(p.personal_information),
-                    "admission_information": _dec_json(p.admisson_information),
-                    "address_information": _dec_json(p.address_information),
-                    "insurance_information": _dec_json(p.insurance_information),
-                    "diagnosis_information": _dec_json(p.diagnosis),
-                    "created_at": p.created_at,
-                    "updated_at": p.updated_at,
-                }
-            )
-
-        facilities = []
-        for fid, entry in facilities_map.items():
-            fac = entry["facility"]
-            patients_list = entry["patients"]
             facilities.append(
                 {
-                    "id": fid,
+                    "id": str(fac.id),
                     "name": getattr(fac, "facility_name_search", None),
                     "status": getattr(fac, "status", None),
                     "patients_count": len(patients_list),
