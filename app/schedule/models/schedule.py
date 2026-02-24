@@ -13,32 +13,112 @@ from typing import Optional
 from pymongo import IndexModel, ASCENDING
 
 
+# class ScheduleDoc(Document):
+#     # 🔗 Relations
+#     facility_id: Link[Facility] = Field(..., description="Facility reference")
+#     provider_id: Link[Provider] = Field(..., description="Provider reference")
+#     patient_id: Link[PatientDoc] = Field(..., description="Patient reference")
+
+#     created_by: Optional[Link[UserDoc]] = None
+#     deleted_by: Optional[Link[UserDoc]] = None
+#     rescheduled_from: Optional[Link["ScheduleDoc"]] = None
+
+#     # 📅 Scheduling
+#     schedule_date: str
+#     slot_time: str
+
+#     # 🔐 Encrypted Fields
+#     # department: Optional[Binary] = None
+#     # is_create_recurring_shift: Optional[Binary] = None
+
+#     # 🔁 Soft delete
+#     is_deleted: Annotated[bool, Indexed()] = False
+#     deleted_at: Optional[datetime] = None
+
+#     # 📌 Status
+
+#     status: Annotated[str, Indexed()] = "scheduled" # scheduled / completed / cancelled / rescheduled
+
+#     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+#     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+#     async def save(self, *args, **kwargs):
+#         self.updated_at = datetime.now(timezone.utc)
+#         return await super().save(*args, **kwargs)
+
+#     model_config = {
+#         "arbitrary_types_allowed": True
+#     }
+
+#     class Settings:
+#         name = "schedule"
+#         indexes = [
+#             [("is_deleted", ASCENDING), ("facility_id.$id", ASCENDING)],
+#             "facility_id",
+#             "provider_id",
+#             "status",
+#             "patient_id",
+#             "created_by",
+#             "rescheduled_from",
+#             [("provider_id.$id", ASCENDING), ("schedule_date", ASCENDING)],
+#             IndexModel(
+#                 [
+#                     ("provider_id.$id", ASCENDING),
+#                     ("schedule_date", ASCENDING),
+#                     ("slot_time", ASCENDING),
+#                 ],
+#                 unique=True,
+#                 name="unique_provider_slot"
+#             )
+#         ]
+
+
+
 class ScheduleDoc(Document):
+
     # 🔗 Relations
     facility_id: Link[Facility] = Field(..., description="Facility reference")
     provider_id: Link[Provider] = Field(..., description="Provider reference")
     patient_id: Link[PatientDoc] = Field(..., description="Patient reference")
 
-    created_by: Optional[Link[UserDoc]] = None
-    deleted_by: Optional[Link[UserDoc]] = None
-    rescheduled_from: Optional[Link["ScheduleDoc"]] = None
-
-    # 📅 Scheduling
-    schedule_date: str
-    slot_time: str
-
-    # 🔐 Encrypted Fields
-    # department: Optional[Binary] = None
-    # is_create_recurring_shift: Optional[Binary] = None
-
-    # 🔁 Soft delete
-    is_deleted: Annotated[bool, Indexed()] = False
-    deleted_at: Optional[datetime] = None
+    # 📅 Core Appointment
+    appointment_datetime: datetime = Field(..., description="UTC appointment datetime")
 
     # 📌 Status
+    status: Annotated[str, Indexed()] = Field(
+        default="scheduled",
+        description="scheduled / completed / cancelled / rescheduled / no_show"
+    )
 
-    status: Annotated[str, Indexed()] = "scheduled" # scheduled / completed / cancelled / rescheduled
+    # 📝 Optional Medical Notes (Encrypt if contains PHI)
+    notes: Optional[str] = None
 
+    # ❌ Cancellation
+    cancelled_by: Optional[Link[UserDoc]] = None
+    cancellation_reason: Optional[str] = None
+    cancelled_at: Optional[datetime] = None
+
+    # 🔁 Reschedule
+    rescheduled_from: Optional[Link["ScheduleDoc"]] = None
+
+    # 👤 Audit Fields (HIPAA important)
+    created_by: Optional[Link[UserDoc]] = None
+    updated_by: Optional[Link[UserDoc]] = None
+
+    # 🗑 Soft Delete
+    is_deleted: Annotated[bool, Indexed()] = False
+    deleted_at: Optional[datetime] = None
+    deleted_by: Optional[Link[UserDoc]] = None
+
+    # ⏱ Check-in / Check-out
+    checkin_time: Optional[datetime] = None
+    checkout_time: Optional[datetime] = None
+
+    # 🚨 Flags
+    reminder_sent: bool = False
+    no_show: bool = False
+
+    # 🕒 Timestamps
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -51,28 +131,54 @@ class ScheduleDoc(Document):
     }
 
     class Settings:
-        name = "schedule"
+        name = "schedules"
+
         indexes = [
-            [("is_deleted", ASCENDING), ("facility_id.$id", ASCENDING)],
+
+            # 🔍 Fast Lookup Indexes
             "facility_id",
             "provider_id",
-            "status",
             "patient_id",
+            "status",
             "created_by",
-            "rescheduled_from",
-            [("provider_id.$id", ASCENDING), ("schedule_date", ASCENDING)],
+
+            # 📅 Provider Calendar Query
             IndexModel(
                 [
                     ("provider_id.$id", ASCENDING),
-                    ("schedule_date", ASCENDING),
-                    ("slot_time", ASCENDING),
+                    ("appointment_datetime", ASCENDING),
+                ],
+                name="provider_calendar_index"
+            ),
+
+            # 🚫 Prevent Double Booking
+            IndexModel(
+                [
+                    ("provider_id.$id", ASCENDING),
+                    ("appointment_datetime", ASCENDING),
                 ],
                 unique=True,
                 name="unique_provider_slot"
-            )
+            ),
+
+            # 📊 Patient History Query
+            IndexModel(
+                [
+                    ("patient_id.$id", ASCENDING),
+                    ("appointment_datetime", ASCENDING),
+                ],
+                name="patient_history_index"
+            ),
+
+            # 🗑 Soft Delete Filtering
+            IndexModel(
+                [
+                    ("is_deleted", ASCENDING),
+                    ("appointment_datetime", ASCENDING),
+                ],
+                name="active_schedule_filter"
+            ),
         ]
-
-
 
 class ProviderAssignmentHistory(Document):
     schedule_id: Link[ScheduleDoc] = Field(..., description="Schedule reference")

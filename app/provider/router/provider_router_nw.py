@@ -1000,7 +1000,6 @@ async def providers_with_facilities_patients(
 
 
 
-
 # ----------------------------------------- Provider id wise show all data and facility and patient 
 
 
