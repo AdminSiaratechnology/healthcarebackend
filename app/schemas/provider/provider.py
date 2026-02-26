@@ -1,6 +1,8 @@
 from pydantic import BaseModel
 from typing import Optional
 from enum import Enum
+from beanie import PydanticObjectId, Link
+from app.patients.models.patients import PatientDoc
 
 class DegreeEnum(str, Enum):
     MD = "MD- Doctor of Medicine"
@@ -32,3 +34,12 @@ class BasicInfo(BaseModel):
     professional_email: Optional[str] = None
     professional_phone: Optional[str] = None
     
+
+
+
+class PatientIdProjection(BaseModel):
+    patient_id: Link["PatientDoc"]
+
+    model_config = {
+        "arbitrary_types_allowed": True
+    }

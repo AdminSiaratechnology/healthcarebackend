@@ -753,14 +753,20 @@ async def list_schedules(
             raise HTTPException(status_code=404, detail="User not found")
 
         # --------------------------------------------------
-        # 2️⃣ Build Conditions (Beanie Style)
+        # 2️⃣ Encryption Init
+        # --------------------------------------------------
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+
+        # --------------------------------------------------
+        # 3️⃣ Build Conditions (Beanie Style)
         # --------------------------------------------------
         conditions = [
             ScheduleDoc.created_by.id == user.id,
             ScheduleDoc.is_deleted == False,
         ]
-
-        
 
         if status:
             conditions.append(
@@ -807,7 +813,7 @@ async def list_schedules(
             )
 
         # --------------------------------------------------
-        # 3️⃣ Query Execution
+        # 4️⃣ Query Execution
         # --------------------------------------------------
         query = ScheduleDoc.find(
             *conditions,
@@ -820,9 +826,21 @@ async def list_schedules(
         schedules = await query.skip(skip).limit(page_size).to_list()
 
         # --------------------------------------------------
-        # 4️⃣ Response Build
+        # 5️⃣ Response Build
         # --------------------------------------------------
         result = []
+
+        def _dec_json(binval):
+            try:
+                if not binval:
+                    return None
+                s = decrypt_value(ce, binval)
+                try:
+                    return json.loads(s) if isinstance(s, str) else s
+                except:
+                    return s
+            except:
+                return None
 
         for schedule in schedules:
             provider = schedule.provider_id
@@ -836,6 +854,18 @@ async def list_schedules(
             if patient and isinstance(patient.user_id, Link):
                 await patient.fetch_link("user_id")
 
+            # Decrypt patient details if needed
+            patient_details = None
+            if patient:
+                patient_details = {
+                    "personal_information": _dec_json(patient.personal_information),
+                    "admission_information": _dec_json(patient.admisson_information),
+                    "address_information": _dec_json(patient.address_information),
+                    "insurance_information": _dec_json(patient.insurance_information),
+                    "emergency_contact_information": _dec_json(patient.emergency_contact_information),
+                    "diagnosis_information": _dec_json(patient.diagnosis),
+                }
+
             result.append({
                 "id": str(schedule.id),
 
@@ -848,11 +878,12 @@ async def list_schedules(
                     if provider and provider.user else None
                 ),
 
-                "patient_id": str(patient.id) if patient else None,
-                "patient_name": (
-                    patient.user_id.full_name_search
-                    if patient and patient.user_id else None
-                ),
+                # "patient_id": str(patient.id) if patient else None,
+                # "patient_name": (
+                #     patient.user_id.full_name_search
+                #     if patient and patient.user_id else None
+                # ),
+                "patient_details": patient_details,
 
                 "appointment_datetime": (
                     schedule.appointment_datetime.isoformat()
