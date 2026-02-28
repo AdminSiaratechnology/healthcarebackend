@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from bson import ObjectId
 import boto3
 from typing import Optional
-from beanie.operators import RegEx,Or,And
+from beanie.operators import RegEx,Or,And,In
 from app.auth.deps import get_current_user_id
 from app.accounts.models.user import UserDoc, UserRole
 from app.facility.models.facility import Facility
@@ -1169,3 +1169,303 @@ async def single_providers_with_facilities_patients(
     except Exception as e:
         print(f"❌ PROVIDER SINGLE WITH FACILITIES & PATIENTS CRASH: {e}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@router.get("/all/scheduled/")
+async def list_all_scheduled_providers(
+    request: Request,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """
+    Returns a list of all providers who have active schedules, 
+    grouped by Provider -> Facility -> Patients. (Paginated by Provider)
+    """
+    try:
+        # 👤 User Validation
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # 🔐 Encryption Init
+        ce = getattr(request.app, "client_encryption", None)
+        if not ce or isinstance(ce, str):
+            ce = init_encryption()
+            request.app.client_encryption = ce
+
+        # 📅 1️⃣ Find unique Provider IDs with active schedules
+        # Beanie aggregate to get distinct provider IDs
+        pipeline_total = [
+            {"$match": {"is_deleted": False, "status": {"$in": ["scheduled", "rescheduled"]}}},
+            {"$group": {"_id": "$provider_id.$id"}}
+        ]
+        all_unique_providers = await ScheduleDoc.aggregate(pipeline_total).to_list()
+        total_providers = len(all_unique_providers)
+
+        # 2️⃣ Paginate those Provider IDs
+        skip = (page - 1) * page_size
+        pipeline_paginated = pipeline_total + [
+            {"$skip": skip},
+            {"$limit": page_size}
+        ]
+        paginated_providers_result = await ScheduleDoc.aggregate(pipeline_paginated).to_list()
+        paginated_provider_ids = [r["_id"] for r in paginated_providers_result]
+
+        if not paginated_provider_ids:
+            return {
+                "success": True,
+                "page": page,
+                "page_size": page_size,
+                "total": total_providers,
+                "data": []
+            }
+
+        # 3️⃣ Fetch ALL active schedules for these paginated providers
+        all_schedules = await ScheduleDoc.find(
+            In(ScheduleDoc.provider_id.id, paginated_provider_ids),
+            ScheduleDoc.is_deleted == False,
+            In(ScheduleDoc.status, ["scheduled", "rescheduled"]),
+            fetch_links=True
+        ).sort("provider_id.$id", "facility_id.$id", "appointment_datetime").to_list()
+
+        def safe_dec(val):
+            try:
+                return decrypt_value(ce, val).strip('"') if val else ""
+            except:
+                return ""
+
+        def dec_json(val):
+            try:
+                if not val:
+                    return None
+                s = decrypt_value(ce, val)
+                return json.loads(s) if isinstance(s, str) else s
+            except:
+                return None
+
+        # 🏗️ Nested Grouping: Provider -> Facility
+        provider_groups = {}
+
+        for sch in all_schedules:
+            prov = sch.provider_id
+            fac = sch.facility_id
+            patient = sch.patient_id
+
+            if not prov or not fac or not patient:
+                continue
+
+            prov_id_str = str(prov.id)
+            fac_id_str = str(fac.id)
+
+            # 1️⃣ Ensure Provider entry exists
+            if prov_id_str not in provider_groups:
+                p_name = f"{safe_dec(prov.first_name)} {safe_dec(prov.last_name)}".strip()
+                degree = safe_dec(prov.degree)
+                provider_groups[prov_id_str] = {
+                    "provider_id": prov_id_str,
+                    "provider_name": p_name,
+                    "provider_status": prov.status,
+                    "degree": degree,
+                    "facilities": {} 
+                }
+
+            # 2️⃣ Ensure Facility entry exists under this Provider
+            if fac_id_str not in provider_groups[prov_id_str]["facilities"]:
+                provider_groups[prov_id_str]["facilities"][fac_id_str] = {
+                    "facility_id": fac_id_str,
+                    "facility_name": getattr(fac, "facility_name_search", None),
+                    "facility_status": getattr(fac, "status", None),
+                    "appointments": []
+                }
+
+            # 3️⃣ Decrypt Patient Name
+            pat_name = None
+            if patient.user_id:
+                pat_name = getattr(patient.user_id, "full_name_search", None)
+            
+            if not pat_name and patient.personal_information:
+                pi = dec_json(patient.personal_information) or {}
+                fn = (pi.get("first_name") or "").strip()
+                ln = (pi.get("last_name") or "").strip()
+                pat_name = f"{fn} {ln}".strip()
+
+            # 4️⃣ Add Appointment to Facility
+            provider_groups[prov_id_str]["facilities"][fac_id_str]["appointments"].append({
+                "schedule_id": str(sch.id),
+                "appointment_datetime": sch.appointment_datetime.isoformat() if sch.appointment_datetime else None,
+                "status": sch.status,
+                "notes": sch.notes,
+                "patient": {
+                    "id": str(patient.id),
+                    "name": pat_name,
+                    "email": getattr(patient.user_id, "email_search", None) if patient.user_id else None,
+                    "phone": getattr(patient.user_id, "phone_search", None) if patient.user_id else None,
+                    "personal_information": dec_json(patient.personal_information),
+                    "admission_information": dec_json(patient.admisson_information),
+                    "address_information": dec_json(patient.address_information),
+                    "insurance_information": dec_json(patient.insurance_information),
+                    "diagnosis_information": dec_json(patient.diagnosis),
+                }
+            })
+
+        # 🔄 Final Response Formatting (Maintain paginated order from IDs)
+        final_data = []
+        for p_id_obj in paginated_provider_ids:
+            p_id_str = str(p_id_obj)
+            if p_id_str in provider_groups:
+                p_info = provider_groups[p_id_str]
+                p_info["facilities"] = list(p_info["facilities"].values())
+                final_data.append(p_info)
+
+        return {
+            "success": True,
+            "page": page,
+            "page_size": page_size,
+            "total_providers": total_providers,
+            "total_pages": (total_providers + page_size - 1) // page_size,
+            "count": len(final_data),
+            "data": final_data
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ LIST ALL SCHEDULED PROVIDERS CRASH: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@router.get("/{provider_id}/scheduled/")
+async def provider_scheduled_patients(
+    request: Request,
+    provider_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """
+    Returns patients scheduled with a specific provider, grouped by facility. (Paginated Appointments)
+    """
+    try:
+        # 👤 User Validation
+        user = await UserDoc.get(current_user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # 🆔 Provider ID Validation
+        try:
+            prov_oid = ObjectId(provider_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid provider_id")
+
+        # 🏥 Provider Fetch
+        provider = await Provider.get(prov_oid, fetch_links=True)
+        if not provider:
+            raise HTTPException(status_code=404, detail="Provider not found")
+        
+        # 🔐 Encryption Init
+        ce = getattr(request.app, "client_encryption", None)
+        if not ce or isinstance(ce, str):
+            ce = init_encryption()
+            request.app.client_encryption = ce
+
+        # 📅 Count total appointments
+        total_appointments = await ScheduleDoc.find(
+            ScheduleDoc.provider_id.id == prov_oid,
+            ScheduleDoc.is_deleted == False,
+            In(ScheduleDoc.status, ["scheduled", "rescheduled"])
+        ).count()
+
+        # 📅 Fetch paginated schedules
+        skip = (page - 1) * page_size
+        schedules = await ScheduleDoc.find(
+            ScheduleDoc.provider_id.id == prov_oid,
+            ScheduleDoc.is_deleted == False,
+            In(ScheduleDoc.status, ["scheduled", "rescheduled"]),
+            fetch_links=True
+        ).sort("appointment_datetime").skip(skip).limit(page_size).to_list()
+
+        def safe_dec(val):
+            try:
+                return decrypt_value(ce, val).strip('"') if val else ""
+            except:
+                return ""
+
+        def dec_json(val):
+            try:
+                if not val:
+                    return None
+                s = decrypt_value(ce, val)
+                return json.loads(s) if isinstance(s, str) else s
+            except:
+                return None
+
+        # 🏗️ Grouping by Facility (Within current page)
+        facility_groups = {}
+
+        for sch in schedules:
+            fac = sch.facility_id
+            patient = sch.patient_id
+
+            if not fac or not patient:
+                continue
+
+            fac_id_str = str(fac.id)
+            if fac_id_str not in facility_groups:
+                facility_groups[fac_id_str] = {
+                    "facility_id": fac_id_str,
+                    "facility_name": getattr(fac, "facility_name_search", None),
+                    "facility_status": getattr(fac, "status", None),
+                    "appointments": []
+                }
+
+            # Decrypt patient name
+            p_name = None
+            if patient.user_id:
+                p_name = getattr(patient.user_id, "full_name_search", None)
+            
+            if not p_name and patient.personal_information:
+                pi = dec_json(patient.personal_information) or {}
+                fn = (pi.get("first_name") or "").strip()
+                ln = (pi.get("last_name") or "").strip()
+                p_name = f"{fn} {ln}".strip()
+
+            facility_groups[fac_id_str]["appointments"].append({
+                "schedule_id": str(sch.id),
+                "appointment_datetime": sch.appointment_datetime.isoformat() if sch.appointment_datetime else None,
+                "status": sch.status,
+                "notes": sch.notes,
+                "patient": {
+                    "id": str(patient.id),
+                    "name": p_name,
+                    "email": getattr(patient.user_id, "email_search", None) if patient.user_id else None,
+                    "phone": getattr(patient.user_id, "phone_search", None) if patient.user_id else None,
+                    "personal_information": dec_json(patient.personal_information),
+                    "admission_information": dec_json(patient.admisson_information),
+                    "address_information": dec_json(patient.address_information),
+                    "insurance_information": dec_json(patient.insurance_information),
+                    "diagnosis_information": dec_json(patient.diagnosis),
+                }
+            })
+
+        provider_name = f"{safe_dec(provider.first_name)} {safe_dec(provider.last_name)}".strip()
+
+        return {
+            "success": True,
+            "page": page,
+            "page_size": page_size,
+            "total_appointments": total_appointments,
+            "total_pages": (total_appointments + page_size - 1) // page_size,
+            "provider": {
+                "id": str(provider.id),
+                "name": provider_name,
+                "status": provider.status,
+            },
+            "data": list(facility_groups.values())
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+         print(f"❌ PROVIDER SCHEDULED PATIENTS CRASH: {e}")
+         raise HTTPException(status_code=500, detail="Internal Server Error")
