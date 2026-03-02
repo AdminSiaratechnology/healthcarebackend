@@ -376,10 +376,14 @@ async def verify_google_auth(
         email_value,
         request
     )
-
+    ce = init_encryption()
+    decrypted_role = safe_decrypt(ce, user.role)
+    ce.close()
+    
     return TokenResponse(
         access_token=access_token,
-        token_type="bearer"
+        token_type="bearer",
+        role=decrypted_role,
     )
 
 
