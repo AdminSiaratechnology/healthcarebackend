@@ -34,7 +34,7 @@ from app.provider.models.providers import Provider
 from app.schemas.provider.basic import BasicInfo
 from app.auth.password import verify_password, hash_password
 from app.utils.audit import log_audit
-from app.encryption.encryption import encrypt_value_deterministic, decrypt_value, encrypt_value
+from app.encryption.encryption import encrypt_value_deterministic, decrypt_value, encrypt_value,init_encryption, safe_decrypt
 from app.database.config import settings
 from app.utils.email import send_email
 from app.accounts.models.password_reset import PasswordReset
@@ -245,6 +245,11 @@ def _build_default_admin_profile_for_user(user: UserDoc, client_encryption) -> A
 async def login(payload: LoginRequest, request: Request):
     user = await _authenticate_user(payload.email, payload.password, request)
     token = _generate_token_for_user(user, payload.email, request)
+      # 🔐 decrypt role
+    ce = init_encryption()
+    decrypted_role = safe_decrypt(ce, user.role)
+    ce.close()
+    
 
     await log_audit(
         request=request,
@@ -256,7 +261,7 @@ async def login(payload: LoginRequest, request: Request):
         notes="User logged in"
     )
 
-    return TokenResponse(access_token=token, token_type="bearer", is_google_auth_enabled=user.is_google_auth_enabled)
+    return TokenResponse(access_token=token, token_type="bearer", is_google_auth_enabled=user.is_google_auth_enabled, role=decrypted_role  )
 
 
 

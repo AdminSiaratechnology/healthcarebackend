@@ -13,6 +13,7 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str
     is_google_auth_enabled: bool = False
+    role : Optional[str] = None
 
 class ProfileResponse(BaseModel):
     id: str
