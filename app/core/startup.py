@@ -55,6 +55,7 @@ from app.device.models.device import DeviceDoc
 from app.PatientNotes.models.notes import PatientNotesDoc
 from  app.ShiftManagement.models.shift import ShiftManagementDocs
 from app.FacilityRole.models.user_facility_role import UserFacilityRole
+from app.scheduler.models import Scheduler
 
 
 from app.utils.audit import AuditLog
@@ -119,7 +120,8 @@ async def startup_app(app):
             DeviceDoc,
             PatientNotesDoc,
             ShiftManagementDocs,
-            UserFacilityRole
+            UserFacilityRole,
+            Scheduler
         ]
         )
      # Encryption init
