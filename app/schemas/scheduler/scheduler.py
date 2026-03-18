@@ -24,6 +24,6 @@ class PaginatedProductOut(BaseModel):
     total: int
     page: int
     limit: int
-    items: list[SchedulerCreate]
+    items: list[SchedulerBase]
 
 
