@@ -15,6 +15,7 @@ from app.facility.models.facility import Facility
 from app.provider.models.providers import Provider
 from app.schedule.models.schedule import ScheduleDoc
 from app.patients.models.patients import PatientDoc
+from app.scheduler.models import Scheduler
 from app.auth.password import hash_password
 from app.encryption.encryption import (
     encrypt_value,
@@ -371,9 +372,24 @@ async def get_all_providers(
         # 3️⃣ Query conditions (Beanie style)
         # ----------------------------
         conditions = [
-            Provider.created_by.id == user.id,
             Provider.is_deleted == False
         ]
+
+        # Decrypt user role for comparison
+        user_role_decrypted = decrypt_value(ce, user.role) if user.role else None
+
+        # Check user role and apply conditions accordingly
+        if user_role_decrypted == UserRole.ADMIN:
+            conditions.append(Provider.created_by.id == user.id)
+        elif user_role_decrypted == UserRole.SCHEDULER:
+            scheduler_record = await Scheduler.find_one(Scheduler.user.id == user.id)
+            if scheduler_record and scheduler_record.created_by:
+                admin_id = scheduler_record.created_by.id
+                conditions.append(Provider.created_by.id == admin_id)
+            else:
+                # If scheduler has no creator, or no scheduler record, they see no providers.
+                # Add a condition that will never be met.
+                conditions.append(Provider.id == PydanticObjectId("000000000000000000000000"))
 
         if status:
             conditions.append(Provider.status == status.lower())
@@ -1020,10 +1036,10 @@ async def single_providers_with_facilities_patients(
             raise HTTPException(status_code=400, detail="Invalid provider_id")
 
         provider = await Provider.get(prov_oid, fetch_links=True)
-        if not provider:
+        if not provider or provider.is_deleted:
             raise HTTPException(status_code=404, detail="Provider not found")
-        if provider.created_by and provider.created_by.id != user.id:
-            raise HTTPException(status_code=403, detail="Not allowed to view this provider")
+
+        # Initialize encryption early for role check
         ce = getattr(request.app, "client_encryption", None)
         if not ce or isinstance(ce, str):
             ce = init_encryption()
@@ -1033,6 +1049,31 @@ async def single_providers_with_facilities_patients(
         if not dek_id:
             dek_id = ensure_data_key()
             request.app.dek_id = dek_id
+
+        # Decrypt user role for comparison
+        user_role_decrypted = decrypt_value(ce, user.role) if user.role else None
+
+        # --- Role-based access check ---
+        is_allowed = False
+        if provider.created_by:  # Provider must have a creator
+            if user_role_decrypted == UserRole.ADMIN:
+                # Admin can see providers they created
+                if provider.created_by.id == user.id:
+                    is_allowed = True
+            elif user_role_decrypted == UserRole.SCHEDULER:
+                # Scheduler can see providers created by the SAME admin who created them
+                scheduler_record = await Scheduler.find_one(
+                    Scheduler.user.id == user.id, fetch_links=True
+                )
+                if scheduler_record and scheduler_record.created_by:
+                    if provider.created_by.id == scheduler_record.created_by.id:
+                        is_allowed = True
+        
+        if not is_allowed:
+            raise HTTPException(
+                status_code=403, detail="Not allowed to view this provider"
+            )
+
 
         try:
             first = decrypt_value(ce, provider.first_name).strip('"') if provider.first_name else ""
