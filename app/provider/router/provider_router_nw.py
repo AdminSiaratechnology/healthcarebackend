@@ -382,7 +382,9 @@ async def get_all_providers(
         if user_role_decrypted == UserRole.ADMIN:
             conditions.append(Provider.created_by.id == user.id)
         elif user_role_decrypted == UserRole.SCHEDULER:
-            scheduler_record = await Scheduler.find_one(Scheduler.user.id == user.id)
+            scheduler_record = await Scheduler.find_one(
+                Scheduler.user.id == user.id, fetch_links=True
+            )
             if scheduler_record and scheduler_record.created_by:
                 admin_id = scheduler_record.created_by.id
                 conditions.append(Provider.created_by.id == admin_id)
