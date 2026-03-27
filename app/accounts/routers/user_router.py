@@ -93,51 +93,158 @@ def _build_default_admin_profile(users: Users) -> AdminProfile:
         ),
     )
 
+# @router.post("/users")
+# async def user_registrations(users: Users, request: Request):
+#     try:
+#         client_encryption = request.app.client_encryption
+#         dek_id = request.app.dek_id
+#         if users.email:
+#             encrypted_email = encrypt_value_deterministic(client_encryption, dek_id, users.email)
+#             existing_email_user = await UserDoc.find_one({"email": encrypted_email})
+#             if existing_email_user:
+#                 raise HTTPException(status_code=400, detail="Email already exists")
+#         hashed_password = hash_password(users.password)
+
+#         encrypted_doc = {
+#             'full_name': encrypt_value(client_encryption, dek_id, users.full_name),
+
+#             'email': encrypt_value_deterministic(client_encryption, dek_id, users.email)
+#                       if users.email else None,
+
+#             'phone': encrypt_value_deterministic(client_encryption, dek_id, users.phone)
+#                      if users.phone else None,
+
+#             'role': encrypt_value(client_encryption, dek_id, users.role.value),
+
+#             'password': encrypt_value(client_encryption, dek_id, hashed_password)
+#                 if hashed_password else None
+#         }
+
+#         user = UserDoc(**encrypted_doc)
+#         await user.insert()
+
+#         if users.role == UserRole.ADMIN:
+#             print("Creating admin profile")
+#             # build profile object (from payload or defaults)
+#             profile_obj = users.admin_profile or _build_default_admin_profile(users)
+#             # convert to JSON-safe dict (dates → strings, enums → values) before encryption
+#             profile_data = profile_obj.model_dump(mode="json")
+#             # encrypt full profile as Binary, similar to how UserDoc fields are encrypted
+#             encrypted_profile = encrypt_value(
+#                 client_encryption,
+#                 dek_id,
+#                 profile_data,
+#             )
+#             admin_doc = Admin(user=user, user_id=str(user.id), profile=encrypted_profile)
+#             await admin_doc.insert()
+        
+
+#         await log_audit(
+#             request=request,
+#             user_id=str(user.id),
+#             action="CREATE",
+#             resource="patient",
+#             resource_id=str(user.id),
+#             status="success",
+#             notes="Patient encrypted data inserted"
+#         )
+
+#         return {
+#             "inserted_id": str(user.id),
+#             "user": "User saved successfully!",
+#             "admin_profile_created": users.role == UserRole.ADMIN
+#         }
+
+#     except Exception as e:
+#         await log_audit(
+#             request=request,
+#             user_id="anonymous",
+#             action="CREATE",
+#             resource="patient",
+#             resource_id="N/A",
+#             status="failed",
+#             notes=str(e)
+#         )
+#         raise HTTPException(status_code=500, detail=str(e))
+
+
+import json
+import traceback
+
+
 @router.post("/users")
 async def user_registrations(users: Users, request: Request):
     try:
         client_encryption = request.app.client_encryption
         dek_id = request.app.dek_id
-        if users.email:
-            encrypted_email = encrypt_value_deterministic(client_encryption, dek_id, users.email)
+
+        print("🚀 API HIT")
+
+        # 🔹 Check existing email (deterministic encryption)
+        if users.email is not None:
+            encrypted_email = encrypt_value_deterministic(
+                client_encryption, dek_id, users.email
+            )
+
             existing_email_user = await UserDoc.find_one({"email": encrypted_email})
+
             if existing_email_user:
-                raise HTTPException(status_code=400, detail="Email already exists")
+                raise HTTPException(
+                    status_code=400,
+                    detail="Email already exists"
+                )
 
+        # 🔹 Hash password ONLY ONCE
+        hashed_password = hash_password(users.password)
+
+        # 🔹 Build encrypted user document
         encrypted_doc = {
-            'full_name': encrypt_value(client_encryption, dek_id, users.full_name),
+            "full_name": encrypt_value(client_encryption, dek_id, users.full_name),
 
-            'email': encrypt_value_deterministic(client_encryption, dek_id, users.email)
-                      if users.email else None,
+            "email": encrypt_value_deterministic(client_encryption, dek_id, users.email)
+            if users.email else None,
 
-            'phone': encrypt_value_deterministic(client_encryption, dek_id, users.phone)
-                     if users.phone else None,
+            "phone": encrypt_value_deterministic(client_encryption, dek_id, users.phone)
+            if users.phone else None,
 
-            'role': encrypt_value(client_encryption, dek_id, users.role.value),
+            "role": encrypt_value(client_encryption, dek_id, users.role.value),
 
-            'password': encrypt_value(client_encryption, dek_id, hash_password(users.password))
-                                if hash_password(users.password) else None
+            # 🔐 Hash + Encrypt password
+            "password": encrypt_value(client_encryption, dek_id, hashed_password)
+            if hashed_password else None,
         }
 
+        # 🔹 Save user
         user = UserDoc(**encrypted_doc)
         await user.insert()
 
+        # 🔹 Admin profile handling
         if users.role == UserRole.ADMIN:
-            print("Creating admin profile")
-            # build profile object (from payload or defaults)
+            print("👤 Creating admin profile")
+
             profile_obj = users.admin_profile or _build_default_admin_profile(users)
-            # convert to JSON-safe dict (dates → strings, enums → values) before encryption
+
+            # convert to JSON-safe dict
             profile_data = profile_obj.model_dump(mode="json")
-            # encrypt full profile as Binary, similar to how UserDoc fields are encrypted
+
+            # ❗ dict → string
+            profile_data_str = json.dumps(profile_data)
+
             encrypted_profile = encrypt_value(
                 client_encryption,
                 dek_id,
-                profile_data,
+                profile_data_str,
             )
-            admin_doc = Admin(user=user, user_id=str(user.id), profile=encrypted_profile)
-            await admin_doc.insert()
-        
 
+            admin_doc = Admin(
+                user=user,
+                user_id=str(user.id),
+                profile=encrypted_profile,
+            )
+
+            await admin_doc.insert()
+
+        # 🔹 Audit log
         await log_audit(
             request=request,
             user_id=str(user.id),
@@ -145,16 +252,23 @@ async def user_registrations(users: Users, request: Request):
             resource="patient",
             resource_id=str(user.id),
             status="success",
-            notes="Patient encrypted data inserted"
+            notes="Patient encrypted data inserted",
         )
 
         return {
             "inserted_id": str(user.id),
-            "user": "User saved successfully!",
-            "admin_profile_created": users.role == UserRole.ADMIN
+            "message": "User saved successfully!",
+            "admin_profile_created": users.role == UserRole.ADMIN,
         }
 
+    # ✅ IMPORTANT: preserve HTTPException (400, 401, etc.)
+    except HTTPException as e:
+        raise e
+
+    # ❌ Only real errors come here
     except Exception as e:
+        print("❌ ERROR TRACE:", traceback.format_exc())
+
         await log_audit(
             request=request,
             user_id="anonymous",
@@ -162,10 +276,13 @@ async def user_registrations(users: Users, request: Request):
             resource="patient",
             resource_id="N/A",
             status="failed",
-            notes=str(e)
+            notes=str(e),
         )
-        raise HTTPException(status_code=500, detail=str(e))
 
+        raise HTTPException(
+            status_code=500,
+            detail="Internal Server Error"
+        )
 
 @router.get("/users")
 async def get_users(request: Request):

@@ -15,6 +15,8 @@ from app.facility.models.facility import Facility
 from app.provider.models.providers import Provider
 from app.schedule.models.schedule import ScheduleDoc
 from app.patients.models.patients import PatientDoc
+from app.facility.models.beds import Beds
+from app.facility.models.facility_rooms import FacilityRooms
 from app.scheduler.models import Scheduler
 from app.auth.password import hash_password
 from app.encryption.encryption import (
@@ -750,6 +752,9 @@ async def get_my_provider_schedules(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     status: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    start_date: Optional[datetime] = Query(None, description="Filter by start date for appointments"),
+    end_date: Optional[datetime] = Query(None, description="Filter by end date for appointments"),
 ):
     try:
         # 1️⃣ Logged-in user
@@ -785,7 +790,32 @@ async def get_my_provider_schedules(
         if status:
             conditions.append(ScheduleDoc.status == status.lower())
 
-        query = ScheduleDoc.find(*conditions, fetch_links=True)
+        if start_date and end_date:
+            conditions.append(ScheduleDoc.appointment_datetime >= start_date)
+            conditions.append(ScheduleDoc.appointment_datetime <= end_date)
+        elif start_date:
+            conditions.append(ScheduleDoc.appointment_datetime >= start_date)
+        elif end_date:
+            conditions.append(ScheduleDoc.appointment_datetime <= end_date)
+
+        if search:
+            search_value = search.lower().strip()
+            conditions.append(
+                Or(
+                    RegEx(
+                        ScheduleDoc.patient_id.user_id.full_name_search,
+                        f"^{search_value}",
+                        options="i"
+                    ),
+                    RegEx(
+                        ScheduleDoc.facility_id.facility_name_search,
+                        f"^{search_value}",
+                        options="i"
+                    ),
+                )
+            )
+
+        query = ScheduleDoc.find(*conditions, fetch_links=True).sort("-appointment_datetime")
 
         total = await query.count()
         schedules = (
@@ -806,26 +836,55 @@ async def get_my_provider_schedules(
                     "facility_name_search": getattr(fac, "facility_name_search", None),
                     "status": fac.status,
                 }
-            shift_time = None
-            if sch.shift_time:
-                decrypted_shift = decrypt_value(ce, sch.shift_time)
-                try:
-                    shift_time = json.loads(decrypted_shift)
-                except Exception:
-                    shift_time = decrypted_shift
-           
+
+            patient_details = {}
+            if sch.patient_id:
+                patient = sch.patient_id
+                pat_name = None
+                if patient.user_id:
+                    pat_name = getattr(patient.user_id, "full_name_search", None)
+                
+                if not pat_name and patient.personal_information:
+                    pi = json.loads(decrypt_value(ce, patient.personal_information) or '{}')
+                    fn = (pi.get("first_name") or "").strip()
+                    ln = (pi.get("last_name") or "").strip()
+                    pat_name = f"{fn} {ln}".strip()
+
+                bed_details = {}
+                room_details = {}
+                if patient.bed_id:
+                    bed = await Beds.get(patient.bed_id.id, fetch_links=True)
+                    if bed:
+                        bed_details = {
+                            "id": str(bed.id),
+                            "bed_number": decrypt_value(ce, bed.bed_number),
+                            "status": decrypt_value(ce, bed.bed_status),
+                        }
+                        if bed.room_id:
+                            room = await FacilityRooms.get(bed.room_id.id)
+                            if room:
+                                room_details = {
+                                    "id": str(room.id),
+                                    "room_number": decrypt_value(ce, room.room_number),
+                                    "room_type": decrypt_value(ce, room.room_type),
+                                }
+
+                patient_details = {
+                    "id": str(patient.id),
+                    "name": pat_name,
+                    "email": getattr(patient.user_id, "email_search", None) if patient.user_id else None,
+                    "phone": getattr(patient.user_id, "phone_search", None) if patient.user_id else None,
+                    "bed": bed_details,
+                    "room": room_details,
+                }
 
             result.append({
                 "id": str(sch.id),
                 "provider": {"id": str(provider.id)},
                 "facility": facility_info,
-                "selected_date": decrypt_value(ce, sch.selected_date) if sch.selected_date else None,
-                "shift_time": shift_time,
-                "department": decrypt_value(ce, sch.department) if sch.department else None,
-                "is_create_recurring_shift": decrypt_value(
-                    ce, sch.is_create_recurring_shift
-                ) if sch.is_create_recurring_shift else None,
+                "appointment_datetime": sch.appointment_datetime.isoformat() if sch.appointment_datetime else None,
                 "status": sch.status,
+                "patient": patient_details,
                 "created_at": sch.created_at,
                 "updated_at": sch.updated_at,
             })
@@ -1334,6 +1393,25 @@ async def list_all_scheduled_providers(
                 pat_name = f"{fn} {ln}".strip()
 
             # 4️⃣ Add Appointment to Facility
+            bed_details = {}
+            room_details = {}
+            if patient.bed_id:
+                bed = await Beds.get(patient.bed_id.id, fetch_links=True)
+                if bed:
+                    bed_details = {
+                        "id": str(bed.id),
+                        "bed_number": safe_dec(bed.bed_number),
+                        "status": safe_dec(bed.bed_status),
+                    }
+                    if bed.room_id:
+                        room = await FacilityRooms.get(bed.room_id.id)
+                        if room:
+                            room_details = {
+                                "id": str(room.id),
+                                "room_number": safe_dec(room.room_number),
+                                "room_type": safe_dec(room.room_type),
+                            }
+
             provider_groups[prov_id_str]["facilities"][fac_id_str]["appointments"].append({
                 "schedule_id": str(sch.id),
                 "appointment_datetime": sch.appointment_datetime.isoformat() if sch.appointment_datetime else None,
@@ -1349,6 +1427,8 @@ async def list_all_scheduled_providers(
                     "address_information": dec_json(patient.address_information),
                     "insurance_information": dec_json(patient.insurance_information),
                     "diagnosis_information": dec_json(patient.diagnosis),
+                    "bed": bed_details,
+                    "room": room_details,
                 }
             })
 
@@ -1427,6 +1507,7 @@ async def provider_scheduled_patients(
             In(ScheduleDoc.status, ["scheduled", "rescheduled"]),
             fetch_links=True
         ).sort("appointment_datetime").skip(skip).limit(page_size).to_list()
+        
 
         def safe_dec(val):
             try:

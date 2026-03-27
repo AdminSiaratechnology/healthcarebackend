@@ -7,6 +7,7 @@ from pydantic import Field
 from app.encryption.decrypt_mixin import AutoDecryptMixin
 from app.encryption.encrypt_mixin import AutoEncryptMixin
 
+
 class UserRole(str, Enum):
     SUPER_ADMIN = "super_admin"
     ADMIN = "admin"
@@ -25,6 +26,7 @@ class UserRole(str, Enum):
     DIRECTOR_OF_NURSING = "director_of_nursing"  # DON
 
 
+
 class UserDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
     full_name: Binary
     email: Optional[Binary] = None
@@ -33,11 +35,10 @@ class UserDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
     is_active: bool = True
     password: Optional[Binary] = None
 
-     # 🔍 Searchable (PLAIN TEXT)
+    # 🔍 Searchable (PLAIN TEXT)
     full_name_search: Optional[str] = None
     email_search: Optional[str] = None
     phone_search: Optional[str] = None
-
 
     mpin: Optional[Binary] = None
     mpin_index: Optional[Binary] = None
@@ -56,6 +57,7 @@ class UserDoc(Document, AutoDecryptMixin, AutoEncryptMixin):
         "arbitrary_types_allowed": True
     }
 
+    
 
     class Settings:
         name = "users"
