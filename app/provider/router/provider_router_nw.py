@@ -755,6 +755,7 @@ async def get_my_provider_schedules(
     search: Optional[str] = Query(None),
     start_date: Optional[datetime] = Query(None, description="Filter by start date for appointments"),
     end_date: Optional[datetime] = Query(None, description="Filter by end date for appointments"),
+    facility_id: Optional[str] = Query(None, description="Filter schedules by facility ID"),
 ):
     try:
         # 1️⃣ Logged-in user
@@ -789,6 +790,9 @@ async def get_my_provider_schedules(
 
         if status:
             conditions.append(ScheduleDoc.status == status.lower())
+
+        if facility_id:
+            conditions.append(ScheduleDoc.facility_id.id == PydanticObjectId(facility_id))
 
         if start_date and end_date:
             conditions.append(ScheduleDoc.appointment_datetime >= start_date)
