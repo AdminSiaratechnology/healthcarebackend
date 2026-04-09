@@ -394,6 +394,8 @@ async def verify_google_auth(
         access_token=access_token,
         token_type="bearer",
         role=decrypted_role,
+        is_google_auth_enabled=user.is_google_auth_enabled,
+        user_id=str(user.id),
     )
 
 
