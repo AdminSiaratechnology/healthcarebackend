@@ -157,8 +157,8 @@ async def create_patient(
         
         patient_user = UserDoc(
             full_name=encrypt_value(ce, dek_id, full_name),
-            email=encrypt_value(ce, dek_id, ci.email) if ci.email else None,
-            phone=encrypt_value(ce, dek_id, ci.phone_number) if ci.phone_number else None,
+            email=encrypt_value_deterministic(ce, dek_id, ci.email) if ci.email else None,
+            phone=encrypt_value_deterministic(ce, dek_id, ci.phone_number) if ci.phone_number else None,
             password=encrypt_value(ce, dek_id, hashed_password) if hashed_password else None,
             role=encrypt_value(ce, dek_id, UserRole.PATIENT.value),
 

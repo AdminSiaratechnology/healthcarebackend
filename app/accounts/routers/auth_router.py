@@ -110,8 +110,18 @@ async def _get_user_from_authorization(request: Request) -> Tuple[UserDoc, Optio
 async def _get_user_by_email(email: str, request: Request) -> UserDoc:
     client_encryption = request.app.client_encryption
     dek_id = request.app.dek_id
-    enc_email = encrypt_value_deterministic(client_encryption, dek_id, email)
+    
+    email_clean = email.lower().strip()
+    
+    # 1️⃣ Try searching via email_search (plain text)
+    user = await UserDoc.find_one({"email_search": email_clean})
+    if user:
+        return user
+        
+    # 2️⃣ Fallback to encrypted email search (deterministic CSFLE)
+    enc_email = encrypt_value_deterministic(client_encryption, dek_id, email_clean)
     user = await UserDoc.find_one({"email": enc_email})
+    
     if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     return user
@@ -261,7 +271,7 @@ async def login(payload: LoginRequest, request: Request):
         notes="User logged in"
     )
 
-    return TokenResponse(access_token=token, token_type="bearer", is_google_auth_enabled=user.is_google_auth_enabled, role=decrypted_role  )
+    return TokenResponse(access_token=token, token_type="bearer", is_google_auth_enabled=user.is_google_auth_enabled, role=decrypted_role, user_id=str(user.id))
 
 
 
@@ -469,7 +479,21 @@ async def get_profile(request: Request):
         admin_doc = await Admin.find_one(Admin.user_id == str(user.id))
         if admin_doc:
             dec_admin = admin_doc.decrypt_fields(client_encryption)
-            admin_profile = dec_admin.get("profile")
+            raw_profile = dec_admin.get("profile")
+            if isinstance(raw_profile, (bytes, bytearray)):
+                try:
+                    admin_profile = json.loads(raw_profile.decode("utf-8"))
+                except Exception:
+                    admin_profile = {}
+            elif isinstance(raw_profile, str):
+                try:
+                    admin_profile = json.loads(raw_profile)
+                except Exception:
+                    admin_profile = {}
+            elif isinstance(raw_profile, dict):
+                admin_profile = raw_profile
+            else:
+                admin_profile = None
             
     elif role_val == "provider":
         provider_doc = await Provider.find_one(Provider.user_id == str(user.id))

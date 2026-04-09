@@ -1,6 +1,6 @@
 
 
-from beanie import PydanticObjectId
+from beanie import PydanticObjectId, Link
 from fastapi import APIRouter, Request, HTTPException, Depends, Form, File, UploadFile, Query
 from pydantic import EmailStr
 from enum import Enum
@@ -835,18 +835,35 @@ async def get_my_provider_schedules(
             facility_info = None
             if sch.facility_id:
                 fac = sch.facility_id
-                facility_info = {
-                    "id": str(fac.id),
-                    "facility_name_search": getattr(fac, "facility_name_search", None),
-                    "status": fac.status,
-                }
+                if hasattr(fac, "fetch") and not hasattr(fac, "facility_name_search"):
+                    fac = await fac.fetch()
+                
+                if fac:
+                    facility_info = {
+                        "id": str(fac.id),
+                        "facility_name_search": getattr(fac, "facility_name_search", None),
+                        "status": fac.status,
+                    }
 
             patient_details = {}
             if sch.patient_id:
                 patient = sch.patient_id
-                pat_name = None
-                if patient.user_id:
-                    pat_name = getattr(patient.user_id, "full_name_search", None)
+                if hasattr(patient, "fetch") and not hasattr(patient, "personal_information"):
+                    patient = await patient.fetch()
+                
+                if patient:
+                    if hasattr(patient, "personal_information") and hasattr(patient, "user_id"):
+                        pat_user = getattr(patient, "user_id", None)
+                        if pat_user and hasattr(pat_user, "fetch") and not hasattr(pat_user, "full_name_search"):
+                            await patient.fetch_link("user_id")
+
+                    pat_name = None
+                    pat_user = getattr(patient, "user_id", None)
+                    if pat_user and hasattr(pat_user, "fetch") and not hasattr(pat_user, "full_name_search"):
+                        pat_user = await pat_user.fetch()
+
+                    if pat_user:
+                        pat_name = getattr(pat_user, "full_name_search", None)
                 
                 if not pat_name and patient.personal_information:
                     pi = json.loads(decrypt_value(ce, patient.personal_information) or '{}')
@@ -857,7 +874,8 @@ async def get_my_provider_schedules(
                 bed_details = {}
                 room_details = {}
                 if patient.bed_id:
-                    bed = await Beds.get(patient.bed_id.id, fetch_links=True)
+                    bed_id_val = patient.bed_id.id if hasattr(patient.bed_id, "id") else patient.bed_id.ref.id
+                    bed = await Beds.get(bed_id_val, fetch_links=True)
                     if bed:
                         bed_details = {
                             "id": str(bed.id),
@@ -865,7 +883,8 @@ async def get_my_provider_schedules(
                             "status": decrypt_value(ce, bed.bed_status),
                         }
                         if bed.room_id:
-                            room = await FacilityRooms.get(bed.room_id.id)
+                            room_id_val = bed.room_id.id if hasattr(bed.room_id, "id") else bed.room_id.ref.id
+                            room = await FacilityRooms.get(room_id_val)
                             if room:
                                 room_details = {
                                     "id": str(room.id),
@@ -876,8 +895,8 @@ async def get_my_provider_schedules(
                 patient_details = {
                     "id": str(patient.id),
                     "name": pat_name,
-                    "email": getattr(patient.user_id, "email_search", None) if patient.user_id else None,
-                    "phone": getattr(patient.user_id, "phone_search", None) if patient.user_id else None,
+                    "email": getattr(pat_user, "email_search", None) if pat_user else None,
+                    "phone": getattr(pat_user, "phone_search", None) if pat_user else None,
                     "bed": bed_details,
                     "room": room_details,
                 }
@@ -1277,6 +1296,250 @@ async def single_providers_with_facilities_patients(
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
+# @router.get("/all/scheduled/")
+# async def list_all_scheduled_providers(
+#     request: Request,
+#     page: int = Query(1, ge=1),
+#     page_size: int = Query(10, ge=1, le=100),
+#     current_user_id: str = Depends(get_current_user_id),
+# ):
+#     """
+#     Returns a list of all providers who have active schedules, 
+#     grouped by Provider -> Facility -> Patients. (Paginated by Provider)
+#     """
+#     try:
+#         # 👤 User Validation
+#         user = await UserDoc.get(current_user_id)
+#         if not user:
+#             raise HTTPException(status_code=404, detail="User not found")
+
+#         # 🔐 Encryption Init
+#         ce = getattr(request.app, "client_encryption", None)
+#         if not ce or isinstance(ce, str):
+#             ce = init_encryption()
+#             request.app.client_encryption = ce
+
+#         # 📅 1️⃣ Find unique Provider IDs with active schedules
+#         # Beanie aggregate to get distinct provider IDs
+#         pipeline_total = [
+#             {
+#                 "$match": {
+#                     "is_deleted": False, 
+#                     "status": {"$in": ["scheduled", "rescheduled"]},
+#                     "provider_id": {"$ne": None}
+#                 }
+#             },
+#             {"$group": {"_id": "$provider_id.$id"}}
+#         ]
+#         all_unique_providers = await ScheduleDoc.aggregate(pipeline_total).to_list()
+#         # Ensure we have clean ObjectIds from the aggregation
+#         paginated_provider_ids_all = []
+#         for r in all_unique_providers:
+#             if r.get("_id"):
+#                 try:
+#                     paginated_provider_ids_all.append(ObjectId(str(r["_id"])))
+#                 except:
+#                     continue
+        
+#         total_providers = len(paginated_provider_ids_all)
+
+#         # 2️⃣ Paginate those Provider IDs
+#         skip = (page - 1) * page_size
+#         paginated_provider_ids = paginated_provider_ids_all[skip : skip + page_size]
+
+#         if not paginated_provider_ids:
+#             return {
+#                 "success": True,
+#                 "page": page,
+#                 "page_size": page_size,
+#                 "total": total_providers,
+#                 "data": []
+#             }
+
+#         # 3️⃣ Fetch ALL active schedules for these paginated providers
+#         # Use explicit In operator with ObjectIds for maximum compatibility
+#         all_schedules = await ScheduleDoc.find(
+#             In(ScheduleDoc.provider_id.id, paginated_provider_ids),
+#             ScheduleDoc.is_deleted == False,
+#             In(ScheduleDoc.status, ["scheduled", "rescheduled"]),
+#             fetch_links=True
+#         ).to_list()
+
+#         # Sort manually if needed to avoid potential link sorting issues on server
+#         all_schedules.sort(key=lambda x: x.appointment_datetime if x.appointment_datetime else datetime.min)
+
+#         print(f"🔍 DEBUG SERVER: total_providers={total_providers}, paginated_count={len(paginated_provider_ids)}, schedules_found={len(all_schedules)}")
+
+#         def safe_dec(val):
+#             try:
+#                 return decrypt_value(ce, val).strip('"') if val else ""
+#             except:
+#                 return ""
+
+#         def dec_json(val):
+#             try:
+#                 if not val:
+#                     return None
+#                 s = decrypt_value(ce, val)
+#                 return json.loads(s) if isinstance(s, str) else s
+#             except:
+#                 return None
+
+#         async def resolve_doc(link_or_doc, required_attr: Optional[str] = None):
+#             if not link_or_doc:
+#                 return None
+#             resolved = link_or_doc
+#             try:
+#                 if isinstance(resolved, Link):
+#                     resolved = await resolved.fetch()
+#                 elif required_attr and hasattr(resolved, "fetch") and not hasattr(resolved, required_attr):
+#                     resolved = await resolved.fetch()
+#             except Exception:
+#                 return None
+#             return resolved
+
+#         def extract_id(doc_or_link):
+#             if not doc_or_link:
+#                 return None
+#             if hasattr(doc_or_link, "id") and getattr(doc_or_link, "id", None):
+#                 return doc_or_link.id
+#             ref = getattr(doc_or_link, "ref", None)
+#             if ref is not None and hasattr(ref, "id"):
+#                 return ref.id
+#             return None
+
+#         # 🏗️ Nested Grouping: Provider -> Facility
+#         provider_groups = {}
+
+#         for sch in all_schedules:
+#             prov = await resolve_doc(sch.provider_id, "first_name")
+#             fac = await resolve_doc(sch.facility_id, "facility_name_search")
+#             patient = await resolve_doc(sch.patient_id, "personal_information")
+
+#             # Be more lenient: skip only if provider is missing
+#             if not prov:
+#                 continue
+
+#             prov_id = extract_id(prov)
+#             fac_id = extract_id(fac)
+#             pat_id = extract_id(patient)
+            
+#             if not prov_id:
+#                 continue
+
+#             prov_id_str = str(prov_id)
+#             fac_id_str = str(fac_id) if fac_id else "unknown_facility"
+
+#             # 1️⃣ Ensure Provider entry exists
+#             if prov_id_str not in provider_groups:
+#                 p_name = f"{safe_dec(prov.first_name)} {safe_dec(prov.last_name)}".strip()
+#                 degree = safe_dec(prov.degree)
+#                 provider_groups[prov_id_str] = {
+#                     "provider_id": prov_id_str,
+#                     "provider_name": p_name or "Unknown Provider",
+#                     "provider_status": prov.status,
+#                     "degree": degree,
+#                     "facilities": {} 
+#                 }
+
+#             # 2️⃣ Ensure Facility entry exists under this Provider
+#             if fac_id_str not in provider_groups[prov_id_str]["facilities"]:
+#                 provider_groups[prov_id_str]["facilities"][fac_id_str] = {
+#                     "facility_id": fac_id_str,
+#                     "facility_name": getattr(fac, "facility_name_search", "Unknown Facility") if fac else "Unknown Facility",
+#                     "facility_status": getattr(fac, "status", "unknown") if fac else "unknown",
+#                     "appointments": []
+#                 }
+
+#             # 3️⃣ Decrypt Patient Name
+#             pat_name = "Unknown Patient"
+#             pat_user = None
+#             if patient:
+#                 pat_user = await resolve_doc(getattr(patient, "user_id", None), "full_name_search")
+#                 if pat_user:
+#                     pat_name = getattr(pat_user, "full_name_search", None)
+                
+#                 personal_information = getattr(patient, "personal_information", None)
+#                 if not pat_name and personal_information:
+#                     pi = dec_json(personal_information) or {}
+#                     fn = (pi.get("first_name") or "").strip()
+#                     ln = (pi.get("last_name") or "").strip()
+#                     pat_name = f"{fn} {ln}".strip() or "Unknown Patient"
+
+#             # 4️⃣ Add Appointment to Facility
+#             bed_details = {}
+#             room_details = {}
+#             if patient and getattr(patient, "bed_id", None):
+#                 patient_bed = getattr(patient, "bed_id", None)
+#                 bed_id_val = extract_id(patient_bed)
+#                 bed = await Beds.get(bed_id_val, fetch_links=True) if bed_id_val else None
+#                 if bed:
+#                     bed_details = {
+#                         "id": str(bed.id),
+#                         "bed_number": safe_dec(bed.bed_number),
+#                         "status": safe_dec(bed.bed_status),
+#                     }
+#                     if bed.room_id:
+#                         room_id_val = extract_id(bed.room_id)
+#                         room = await FacilityRooms.get(room_id_val) if room_id_val else None
+#                         if room:
+#                             room_details = {
+#                                 "id": str(room.id),
+#                                 "room_number": safe_dec(room.room_number),
+#                                 "room_type": safe_dec(room.room_type),
+#                             }
+
+#             provider_groups[prov_id_str]["facilities"][fac_id_str]["appointments"].append({
+#                 "schedule_id": str(sch.id),
+#                 "appointment_datetime": sch.appointment_datetime.isoformat() if sch.appointment_datetime else None,
+#                 "status": sch.status,
+#                 "notes": sch.notes,
+#                 "patient": {
+#                     "id": str(pat_id) if pat_id else None,
+#                     "name": pat_name,
+#                     "email": getattr(pat_user, "email_search", None) if pat_user else None,
+#                     "phone": getattr(pat_user, "phone_search", None) if pat_user else None,
+#                     "personal_information": dec_json(getattr(patient, "personal_information", None)) if patient else None,
+#                     "admission_information": dec_json(getattr(patient, "admisson_information", None)) if patient else None,
+#                     "address_information": dec_json(getattr(patient, "address_information", None)) if patient else None,
+#                     "insurance_information": dec_json(getattr(patient, "insurance_information", None)) if patient else None,
+#                     "diagnosis_information": dec_json(getattr(patient, "diagnosis", None)) if patient else None,
+#                     "bed": bed_details,
+#                     "room": room_details,
+#                 }
+#             })
+
+#         # 🔄 Final Response Formatting (Maintain paginated order from IDs)
+
+#         final_data = []
+#         for p_id_obj in paginated_provider_ids:
+#             p_id_str = str(p_id_obj)
+#             if p_id_str in provider_groups:
+#                 p_info = provider_groups[p_id_str]
+#                 p_info["facilities"] = list(p_info["facilities"].values())
+#                 final_data.append(p_info)
+
+        
+#         print("TYPE:", type(sch.provider_id))
+#         print("VALUE:", sch.provider_id)
+
+#         return {
+#             "success": True,
+#             "page": page,
+#             "page_size": page_size,
+#             "total_providers": total_providers,
+#             "total_pages": (total_providers + page_size - 1) // page_size,
+#             "count": len(final_data),
+#             "data": final_data
+#         }
+
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         print(f"❌ LIST ALL SCHEDULED PROVIDERS CRASH: {e}")
+#         raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
 @router.get("/all/scheduled/")
 async def list_all_scheduled_providers(
     request: Request,
@@ -1284,10 +1547,6 @@ async def list_all_scheduled_providers(
     page_size: int = Query(10, ge=1, le=100),
     current_user_id: str = Depends(get_current_user_id),
 ):
-    """
-    Returns a list of all providers who have active schedules, 
-    grouped by Provider -> Facility -> Patients. (Paginated by Provider)
-    """
     try:
         # 👤 User Validation
         user = await UserDoc.get(current_user_id)
@@ -1300,41 +1559,58 @@ async def list_all_scheduled_providers(
             ce = init_encryption()
             request.app.client_encryption = ce
 
-        # 📅 1️⃣ Find unique Provider IDs with active schedules
-        # Beanie aggregate to get distinct provider IDs
-        pipeline_total = [
-            {"$match": {"is_deleted": False, "status": {"$in": ["scheduled", "rescheduled"]}}},
-            {"$group": {"_id": "$provider_id.$id"}}
+        # 📅 1️⃣ Get unique provider IDs
+        pipeline = [
+            {
+                "$match": {
+                    "is_deleted": False,
+                    "status": {"$in": ["scheduled", "rescheduled"]},
+                    "provider_id": {"$ne": None},
+                }
+            },
+            {"$group": {"_id": "$provider_id.$id"}},
         ]
-        all_unique_providers = await ScheduleDoc.aggregate(pipeline_total).to_list()
-        total_providers = len(all_unique_providers)
 
-        # 2️⃣ Paginate those Provider IDs
+        result = await ScheduleDoc.aggregate(pipeline).to_list()
+
+        provider_ids_all = []
+        for r in result:
+            if r.get("_id"):
+                try:
+                    provider_ids_all.append(ObjectId(str(r["_id"])))
+                except:
+                    continue
+
+        total_providers = len(provider_ids_all)
+
+        # 📄 Pagination
         skip = (page - 1) * page_size
-        pipeline_paginated = pipeline_total + [
-            {"$skip": skip},
-            {"$limit": page_size}
-        ]
-        paginated_providers_result = await ScheduleDoc.aggregate(pipeline_paginated).to_list()
-        paginated_provider_ids = [r["_id"] for r in paginated_providers_result]
+        paginated_provider_ids = provider_ids_all[skip : skip + page_size]
 
         if not paginated_provider_ids:
             return {
                 "success": True,
                 "page": page,
                 "page_size": page_size,
-                "total": total_providers,
-                "data": []
+                "total_providers": total_providers,
+                "data": [],
             }
 
-        # 3️⃣ Fetch ALL active schedules for these paginated providers
+        # 📅 2️⃣ Fetch schedules
         all_schedules = await ScheduleDoc.find(
             In(ScheduleDoc.provider_id.id, paginated_provider_ids),
             ScheduleDoc.is_deleted == False,
             In(ScheduleDoc.status, ["scheduled", "rescheduled"]),
-            fetch_links=True
-        ).sort("provider_id.$id", "facility_id.$id", "appointment_datetime").to_list()
+            fetch_links=True,
+        ).to_list()
 
+        all_schedules.sort(
+            key=lambda x: x.appointment_datetime if x.appointment_datetime else datetime.min
+        )
+
+        print(f"✅ schedules_found={len(all_schedules)}")
+
+        # 🔧 Helpers
         def safe_dec(val):
             try:
                 return decrypt_value(ce, val).strip('"') if val else ""
@@ -1350,65 +1626,100 @@ async def list_all_scheduled_providers(
             except:
                 return None
 
-        # 🏗️ Nested Grouping: Provider -> Facility
+        def extract_id(doc):
+            if not doc:
+                return None
+
+            # Document
+            if hasattr(doc, "id") and doc.id:
+                return str(doc.id)
+
+            # Link
+            if hasattr(doc, "ref") and doc.ref:
+                return str(doc.ref.id)
+
+            return None
+
+        async def ensure_doc(doc):
+            """अगर Link hai to fetch karo, warna direct return"""
+            if not doc:
+                return None
+            if isinstance(doc, Link):
+                try:
+                    return await doc.fetch()
+                except Exception as e:
+                    print("❌ fetch error:", e)
+                    return None
+            return doc
+
+        # 🏗️ Grouping
         provider_groups = {}
 
         for sch in all_schedules:
-            prov = sch.provider_id
-            fac = sch.facility_id
-            patient = sch.patient_id
+            prov = await ensure_doc(sch.provider_id)
+            fac = await ensure_doc(sch.facility_id)
+            patient = await ensure_doc(sch.patient_id)
 
-            if not prov or not fac or not patient:
+            if not prov:
                 continue
 
-            prov_id_str = str(prov.id)
-            fac_id_str = str(fac.id)
+            prov_id = extract_id(prov)
+            fac_id = extract_id(fac) or "unknown_facility"
+            pat_id = extract_id(patient)
 
-            # 1️⃣ Ensure Provider entry exists
-            if prov_id_str not in provider_groups:
-                p_name = f"{safe_dec(prov.first_name)} {safe_dec(prov.last_name)}".strip()
-                degree = safe_dec(prov.degree)
-                provider_groups[prov_id_str] = {
-                    "provider_id": prov_id_str,
-                    "provider_name": p_name,
-                    "provider_status": prov.status,
-                    "degree": degree,
-                    "facilities": {} 
+            if not prov_id:
+                continue
+
+            # 👨‍⚕️ Provider
+            if prov_id not in provider_groups:
+                provider_groups[prov_id] = {
+                    "provider_id": prov_id,
+                    "provider_name": f"{safe_dec(prov.first_name)} {safe_dec(prov.last_name)}".strip() or "Unknown Provider",
+                    "provider_status": getattr(prov, "status", None),
+                    "degree": safe_dec(getattr(prov, "degree", None)),
+                    "facilities": {},
                 }
 
-            # 2️⃣ Ensure Facility entry exists under this Provider
-            if fac_id_str not in provider_groups[prov_id_str]["facilities"]:
-                provider_groups[prov_id_str]["facilities"][fac_id_str] = {
-                    "facility_id": fac_id_str,
-                    "facility_name": getattr(fac, "facility_name_search", None),
-                    "facility_status": getattr(fac, "status", None),
-                    "appointments": []
+            # 🏥 Facility
+            if fac_id not in provider_groups[prov_id]["facilities"]:
+                provider_groups[prov_id]["facilities"][fac_id] = {
+                    "facility_id": fac_id,
+                    "facility_name": getattr(fac, "facility_name_search", "Unknown Facility") if fac else "Unknown Facility",
+                    "facility_status": getattr(fac, "status", "unknown") if fac else "unknown",
+                    "appointments": [],
                 }
 
-            # 3️⃣ Decrypt Patient Name
-            pat_name = None
-            if patient.user_id:
-                pat_name = getattr(patient.user_id, "full_name_search", None)
-            
-            if not pat_name and patient.personal_information:
-                pi = dec_json(patient.personal_information) or {}
-                fn = (pi.get("first_name") or "").strip()
-                ln = (pi.get("last_name") or "").strip()
-                pat_name = f"{fn} {ln}".strip()
+            # 👤 Patient
+            pat_name = "Unknown Patient"
+            pat_user = None
 
-            # 4️⃣ Add Appointment to Facility
+            if patient:
+                pat_user = await ensure_doc(getattr(patient, "user_id", None))
+
+                if pat_user:
+                    pat_name = getattr(pat_user, "full_name_search", None)
+
+                if not pat_name:
+                    pi = dec_json(getattr(patient, "personal_information", None)) or {}
+                    pat_name = f"{pi.get('first_name','')} {pi.get('last_name','')}".strip() or "Unknown Patient"
+
+            # 🛏️ Bed / Room
             bed_details = {}
             room_details = {}
-            if patient.bed_id:
-                bed = await Beds.get(patient.bed_id.id, fetch_links=True)
+
+            if patient and getattr(patient, "bed_id", None):
+                bed_link = getattr(patient, "bed_id")
+                bed = await ensure_doc(bed_link)
+
                 if bed:
                     bed_details = {
                         "id": str(bed.id),
                         "bed_number": safe_dec(bed.bed_number),
                         "status": safe_dec(bed.bed_status),
                     }
+
                     if bed.room_id:
-                        room = await FacilityRooms.get(bed.room_id.id)
+                        room = await ensure_doc(bed.room_id)
                         if room:
                             room_details = {
                                 "id": str(room.id),
@@ -1416,30 +1727,35 @@ async def list_all_scheduled_providers(
                                 "room_type": safe_dec(room.room_type),
                             }
 
-            provider_groups[prov_id_str]["facilities"][fac_id_str]["appointments"].append({
-                "schedule_id": str(sch.id),
-                "appointment_datetime": sch.appointment_datetime.isoformat() if sch.appointment_datetime else None,
-                "status": sch.status,
-                "notes": sch.notes,
-                "patient": {
-                    "id": str(patient.id),
-                    "name": pat_name,
-                    "email": getattr(patient.user_id, "email_search", None) if patient.user_id else None,
-                    "phone": getattr(patient.user_id, "phone_search", None) if patient.user_id else None,
-                    "personal_information": dec_json(patient.personal_information),
-                    "admission_information": dec_json(patient.admisson_information),
-                    "address_information": dec_json(patient.address_information),
-                    "insurance_information": dec_json(patient.insurance_information),
-                    "diagnosis_information": dec_json(patient.diagnosis),
-                    "bed": bed_details,
-                    "room": room_details,
+            # 📅 Appointment
+            provider_groups[prov_id]["facilities"][fac_id]["appointments"].append(
+                {
+                    "schedule_id": str(sch.id),
+                    "appointment_datetime": sch.appointment_datetime.isoformat()
+                    if sch.appointment_datetime
+                    else None,
+                    "status": sch.status,
+                    "notes": sch.notes,
+                    "patient": {
+                        "id": pat_id,
+                        "name": pat_name,
+                        "email": getattr(pat_user, "email_search", None) if pat_user else None,
+                        "phone": getattr(pat_user, "phone_search", None) if pat_user else None,
+                        "personal_information": dec_json(getattr(patient, "personal_information", None)) if patient else None,
+                        "admission_information": dec_json(getattr(patient, "admisson_information", None)) if patient else None,
+                        "address_information": dec_json(getattr(patient, "address_information", None)) if patient else None,
+                        "insurance_information": dec_json(getattr(patient, "insurance_information", None)) if patient else None,
+                        "diagnosis_information": dec_json(getattr(patient, "diagnosis", None)) if patient else None,
+                        "bed": bed_details,
+                        "room": room_details,
+                    },
                 }
-            })
+            )
 
-        # 🔄 Final Response Formatting (Maintain paginated order from IDs)
+        # 🔄 Final Format
         final_data = []
-        for p_id_obj in paginated_provider_ids:
-            p_id_str = str(p_id_obj)
+        for p_id in paginated_provider_ids:
+            p_id_str = str(p_id)
             if p_id_str in provider_groups:
                 p_info = provider_groups[p_id_str]
                 p_info["facilities"] = list(p_info["facilities"].values())
@@ -1452,13 +1768,11 @@ async def list_all_scheduled_providers(
             "total_providers": total_providers,
             "total_pages": (total_providers + page_size - 1) // page_size,
             "count": len(final_data),
-            "data": final_data
+            "data": final_data,
         }
 
-    except HTTPException:
-        raise
     except Exception as e:
-        print(f"❌ LIST ALL SCHEDULED PROVIDERS CRASH: {e}")
+        print("❌ ERROR:", e)
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
@@ -1535,8 +1849,19 @@ async def provider_scheduled_patients(
             fac = sch.facility_id
             patient = sch.patient_id
 
+            # Ensure all links are fetched if fetch_links=True failed to resolve some
+            if hasattr(fac, "fetch") and not hasattr(fac, "facility_name_search"):
+                fac = await fac.fetch()
+            if hasattr(patient, "fetch") and not hasattr(patient, "personal_information"):
+                patient = await patient.fetch()
+
             if not fac or not patient:
                 continue
+
+            # Ensure patient's user_id link is also fetched to get name/email/phone
+            pat_user = getattr(patient, "user_id", None)
+            if pat_user and hasattr(pat_user, "fetch") and not hasattr(pat_user, "full_name_search"):
+                pat_user = await pat_user.fetch()
 
             fac_id_str = str(fac.id)
             if fac_id_str not in facility_groups:
@@ -1549,8 +1874,8 @@ async def provider_scheduled_patients(
 
             # Decrypt patient name
             p_name = None
-            if patient.user_id:
-                p_name = getattr(patient.user_id, "full_name_search", None)
+            if pat_user:
+                p_name = getattr(pat_user, "full_name_search", None)
             
             if not p_name and patient.personal_information:
                 pi = dec_json(patient.personal_information) or {}

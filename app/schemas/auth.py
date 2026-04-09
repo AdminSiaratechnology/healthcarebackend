@@ -10,6 +10,7 @@ class LoginRequest(BaseModel):
     password: str
 
 class TokenResponse(BaseModel):
+    user_id: str
     access_token: str
     token_type: str
     is_google_auth_enabled: bool = False

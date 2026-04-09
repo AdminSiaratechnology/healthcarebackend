@@ -6,6 +6,7 @@ from app.facility.models.facility_rooms import FacilityRooms
 from app.accounts.models.user import UserDoc
 from app.auth.deps import get_current_user_id
 from app.encryption.encryption import encrypt_value, decrypt_value, init_encryption, ensure_data_key, encrypt_value_deterministic,encrypt_dict
+from app.provider.models.providers import Provider
 from app.utils.audit import log_audit
 from app.schemas.clinicalmonitoring.category import CategorySchema
 from beanie import PydanticObjectId
@@ -251,6 +252,167 @@ async def create_category(
 #         )
 
 
+# @router.get("/list/")
+# async def get_all_categories(
+#     request: Request,
+#     current_user_id: str = Depends(get_current_user_id),
+
+#     page: int = Query(1, ge=1),
+#     page_size: int = Query(10, ge=1, le=100),
+
+#     search: Optional[str] = Query(None),
+#     status: Optional[str] = Query(None),
+# ):
+#     try:
+#         # --------------------------------------------------
+#         # 1️⃣ Current User
+#         # --------------------------------------------------
+#         user = await UserDoc.get(current_user_id)
+#         if not user:
+#             raise HTTPException(status_code=404, detail="User not found")
+
+#         # --------------------------------------------------
+#         # 2️⃣ Encryption init
+#         # --------------------------------------------------
+#         ce = getattr(request.app, "client_encryption", None)
+#         if ce is None:
+#             ce = init_encryption()
+#             request.app.client_encryption = ce
+
+#         # --------------------------------------------------
+#         # 3️⃣ Category query conditions
+#         # --------------------------------------------------
+#         conditions = [
+#             CategoryDoc.created_by.id == user.id,
+#             CategoryDoc.is_deleted == False,
+#         ]
+
+#         if status:
+#             conditions.append(CategoryDoc.status == status.lower())
+
+#         if search:
+#             conditions.append(
+#                 RegEx(CategoryDoc.name_search, f"^{search.strip().lower()}")
+#             )
+
+#         # --------------------------------------------------
+#         # 4️⃣ Pagination
+#         # --------------------------------------------------
+#         skip = (page - 1) * page_size
+
+#         # --------------------------------------------------
+#         # 5️⃣ Fetch categories
+#         # --------------------------------------------------
+#         categories = await (
+#             CategoryDoc.find(
+#                 *conditions,
+#                 fetch_links=True
+#             )
+#             .sort("-created_at")
+#             .skip(skip)
+#             .limit(page_size)
+#             .to_list()
+#         )
+
+#         total = await CategoryDoc.find(*conditions).count()
+
+#         # --------------------------------------------------
+#         # 6️⃣ Fetch ALL subcategories (single query)
+#         # --------------------------------------------------
+#         category_ids = [cat.id for cat in categories]
+
+        
+#         subcategories = await SubcategoryDoc.find(
+#             In(SubcategoryDoc.category_id.id, category_ids),
+#             SubcategoryDoc.created_by.id == user.id,
+#             SubcategoryDoc.is_deleted == False,
+#             fetch_links=True
+#         ).to_list()
+       
+        
+#         # --------------------------------------------------
+#         # 7️⃣ Group subcategories by category_id
+#         # --------------------------------------------------
+#         subcategory_map: dict[str, list] = {}
+
+#         for sub in subcategories:
+#             cat_id = str(sub.category_id.id)
+
+#             subcategory_map.setdefault(cat_id, []).append({
+#                 "id": str(sub.id),
+#                 "name": decrypt_value(ce, sub.name),
+#                 "content": decrypt_value(ce, sub.content),
+#                 "description": decrypt_value(ce, sub.description),
+#                 "status": sub.status,
+#                 "created_at": sub.created_at,
+#                 "updated_at": sub.updated_at,
+#             })
+
+#         # --------------------------------------------------
+#         # 8️⃣ Build final response
+#         # --------------------------------------------------
+#         result = []
+
+#         for category in categories:
+#             result.append({
+#                 "id": str(category.id),
+#                 "name": decrypt_value(ce, category.name),
+#                 "status": category.status,
+#                 "created_by": (
+#                     str(category.created_by.id)
+#                     if category.created_by else None
+#                 ),
+#                 "created_at": category.created_at,
+#                 "updated_at": category.updated_at,
+
+#                 # 🔥 Always present (even if empty)
+#                 "subcategories": subcategory_map.get(str(category.id), [])
+#             })
+
+#         # --------------------------------------------------
+#         # 9️⃣ Audit log
+#         # --------------------------------------------------
+#         try:
+#             await log_audit(
+#                 request=request,
+#                 user_id=str(user.id),
+#                 action="READ",
+#                 resource="Category",
+#                 resource_id="LIST",
+#                 status="success",
+#                 notes=(
+#                     f"Categories fetched | "
+#                     f"page={page}, page_size={page_size}, "
+#                     f"search={search}, status={status}, "
+#                     f"returned={len(result)}"
+#                 ),
+#             )
+#         except Exception:
+#             pass
+
+#         # --------------------------------------------------
+#         # 🔟 Final Response
+#         # --------------------------------------------------
+#         return {
+#             "success": True,
+#             "page": page,
+#             "page_size": page_size,
+#             "total_pages": (total + page_size - 1) // page_size,
+#             "count": len(result),
+#             "total": total,
+#             "data": result,
+#         }
+
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         print("❌ Category List Crash:", e)
+#         raise HTTPException(
+#             status_code=500,
+#             detail="Internal Server Error while fetching categories",
+#         )
+
+
 @router.get("/list/")
 async def get_all_categories(
     request: Request,
@@ -271,7 +433,21 @@ async def get_all_categories(
             raise HTTPException(status_code=404, detail="User not found")
 
         # --------------------------------------------------
-        # 2️⃣ Encryption init
+        # 2️⃣ Check Provider
+        # --------------------------------------------------
+        provider = await Provider.find_one(
+            Provider.user.id == user.id,
+            Provider.is_deleted == False
+        )
+
+        # 👉 Decide owner
+        if provider and provider.created_by:
+            owner_id = provider.created_by.ref.id   # Admin
+        else:
+            owner_id = user.id                  # Self
+
+        # --------------------------------------------------
+        # 3️⃣ Encryption init
         # --------------------------------------------------
         ce = getattr(request.app, "client_encryption", None)
         if ce is None:
@@ -279,10 +455,10 @@ async def get_all_categories(
             request.app.client_encryption = ce
 
         # --------------------------------------------------
-        # 3️⃣ Category query conditions
+        # 4️⃣ Category query conditions
         # --------------------------------------------------
         conditions = [
-            CategoryDoc.created_by.id == user.id,
+            CategoryDoc.created_by.id == owner_id,
             CategoryDoc.is_deleted == False,
         ]
 
@@ -295,12 +471,12 @@ async def get_all_categories(
             )
 
         # --------------------------------------------------
-        # 4️⃣ Pagination
+        # 5️⃣ Pagination
         # --------------------------------------------------
         skip = (page - 1) * page_size
 
         # --------------------------------------------------
-        # 5️⃣ Fetch categories
+        # 6️⃣ Fetch categories
         # --------------------------------------------------
         categories = await (
             CategoryDoc.find(
@@ -316,21 +492,23 @@ async def get_all_categories(
         total = await CategoryDoc.find(*conditions).count()
 
         # --------------------------------------------------
-        # 6️⃣ Fetch ALL subcategories (single query)
+        # 7️⃣ Fetch ALL subcategories
         # --------------------------------------------------
         category_ids = [cat.id for cat in categories]
 
-        
-        subcategories = await SubcategoryDoc.find(
+        sub_conditions = [
             In(SubcategoryDoc.category_id.id, category_ids),
-            SubcategoryDoc.created_by.id == user.id,
+            SubcategoryDoc.created_by.id == owner_id,
             SubcategoryDoc.is_deleted == False,
+        ]
+
+        subcategories = await SubcategoryDoc.find(
+            *sub_conditions,
             fetch_links=True
         ).to_list()
-       
-        
+
         # --------------------------------------------------
-        # 7️⃣ Group subcategories by category_id
+        # 8️⃣ Group subcategories
         # --------------------------------------------------
         subcategory_map: dict[str, list] = {}
 
@@ -348,7 +526,7 @@ async def get_all_categories(
             })
 
         # --------------------------------------------------
-        # 8️⃣ Build final response
+        # 9️⃣ Build response
         # --------------------------------------------------
         result = []
 
@@ -363,13 +541,11 @@ async def get_all_categories(
                 ),
                 "created_at": category.created_at,
                 "updated_at": category.updated_at,
-
-                # 🔥 Always present (even if empty)
                 "subcategories": subcategory_map.get(str(category.id), [])
             })
 
         # --------------------------------------------------
-        # 9️⃣ Audit log
+        # 🔟 Audit log
         # --------------------------------------------------
         try:
             await log_audit(
@@ -380,7 +556,7 @@ async def get_all_categories(
                 resource_id="LIST",
                 status="success",
                 notes=(
-                    f"Categories fetched | "
+                    f"Categories fetched | owner={owner_id} | "
                     f"page={page}, page_size={page_size}, "
                     f"search={search}, status={status}, "
                     f"returned={len(result)}"
@@ -390,7 +566,7 @@ async def get_all_categories(
             pass
 
         # --------------------------------------------------
-        # 🔟 Final Response
+        # ✅ Final Response
         # --------------------------------------------------
         return {
             "success": True,
@@ -410,6 +586,9 @@ async def get_all_categories(
             status_code=500,
             detail="Internal Server Error while fetching categories",
         )
+
+
+
 
 
 @router.put("/update/{category_id}/")

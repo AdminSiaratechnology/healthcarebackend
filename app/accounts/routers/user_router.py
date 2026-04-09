@@ -212,6 +212,11 @@ async def user_registrations(users: Users, request: Request):
             # 🔐 Hash + Encrypt password
             "password": encrypt_value(client_encryption, dek_id, hashed_password)
             if hashed_password else None,
+
+            # 🔍 Searchable (PLAIN TEXT)
+            "full_name_search": users.full_name.lower().strip(),
+            "email_search": users.email.lower().strip() if users.email else None,
+            "phone_search": users.phone.strip() if users.phone else None,
         }
 
         # 🔹 Save user
