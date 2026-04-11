@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
-from fastapi import APIRouter, Request, HTTPException, Depends, Query
+import pandas as pd
+
+from fastapi import APIRouter, File, Request, HTTPException, Depends, Query, UploadFile
 from pydantic import ValidationError
 from app.facility.models.facility import Facility
 from app.facility.models.facility_rooms import FacilityRooms
@@ -458,7 +460,7 @@ async def get_all_categories(
         # 4️⃣ Category query conditions
         # --------------------------------------------------
         conditions = [
-            CategoryDoc.created_by.id == owner_id,
+            # CategoryDoc.created_by.id == owner_id,
             CategoryDoc.is_deleted == False,
         ]
 
@@ -498,7 +500,7 @@ async def get_all_categories(
 
         sub_conditions = [
             In(SubcategoryDoc.category_id.id, category_ids),
-            SubcategoryDoc.created_by.id == owner_id,
+            # SubcategoryDoc.created_by.id == owner_id,
             SubcategoryDoc.is_deleted == False,
         ]
 
@@ -518,8 +520,8 @@ async def get_all_categories(
             subcategory_map.setdefault(cat_id, []).append({
                 "id": str(sub.id),
                 "name": decrypt_value(ce, sub.name),
-                "content": decrypt_value(ce, sub.content),
-                "description": decrypt_value(ce, sub.description),
+                # "content": decrypt_value(ce, sub.content),
+                # "description": decrypt_value(ce, sub.description),
                 "status": sub.status,
                 "created_at": sub.created_at,
                 "updated_at": sub.updated_at,
@@ -622,7 +624,7 @@ async def update_category(
        
         category = await CategoryDoc.find_one(
             CategoryDoc.id == category_obj_id,
-            CategoryDoc.created_by.id == user.id,
+            # CategoryDoc.created_by.id == user.id,
             CategoryDoc.is_deleted == False,
         )
         
@@ -706,3 +708,133 @@ async def update_category(
             pass
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
+
+
+
+
+# ------------------------------- upload file for category and subcategory -------------------------------
+
+async def import_excel(file_path: str, request):
+    df = pd.read_excel(file_path)
+
+    df.columns = df.columns.str.strip()
+
+    # 🔐 Encryption setup
+    ce = getattr(request.app, "client_encryption", None)
+    dek_id = getattr(request.app, "dek_id", None)
+
+    category_cache = {}
+
+    for _, row in df.iterrows():
+        category_name = str(row["Category Name"]).strip()
+        subcategory_name = str(row["Subcategory Name"]).strip()
+
+        if not category_name or not subcategory_name:
+            continue
+
+        category_key = category_name.lower()
+        subcategory_key = subcategory_name.lower()
+
+        # ================= CATEGORY =================
+        if category_key in category_cache:
+            category = category_cache[category_key]
+        else:
+            category = await CategoryDoc.find_one(
+                CategoryDoc.name_search == category_key,
+                CategoryDoc.is_deleted == False,
+            )
+
+            if not category:
+                encrypted = encrypt_dict(
+                    ce,
+                    dek_id,
+                    {"category_name": category_name}
+                )
+
+                category = CategoryDoc(
+                    name_search=category_key,
+                    name=encrypted["category_name"],
+                    status="active",
+                    is_deleted=False,
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
+                )
+                await category.insert()
+
+            category_cache[category_key] = category
+
+        # ================= SUBCATEGORY =================
+        subcategory = await SubcategoryDoc.find_one(
+            SubcategoryDoc.name_search == subcategory_key,
+            SubcategoryDoc.category_id.id == category.id,
+            SubcategoryDoc.is_deleted == False,
+        )
+
+        if not subcategory:
+            encrypted_sub = encrypt_dict(
+                ce,
+                dek_id,
+                {"subcategory_name": subcategory_name}
+            )
+
+            subcategory = SubcategoryDoc(
+                category_id=category,
+                name_search=subcategory_key,
+                name=encrypted_sub["subcategory_name"],
+                status="active",
+                is_deleted=False,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+            await subcategory.insert()
+
+    return {"message": "Excel imported successfully"}
+
+
+
+
+# @router.post("/upload-template")
+# async def upload_template(file: UploadFile = File(...)):
+#     file_location = f"temp_{file.filename}"
+
+#     with open(file_location, "wb") as f:
+#         f.write(await file.read())
+
+#     result = await import_excel(file_location)
+
+#     # 🧹 optional cleanup
+#     os.remove(file_location)
+
+#     return result
+
+
+@router.post("/upload-template")
+async def upload_template(file: UploadFile = File(...), request: Request = None):
+    try:
+        # 1️⃣ Save file
+        file_location = f"temp_{file.filename}"
+        with open(file_location, "wb") as f:
+            f.write(await file.read())
+
+        # 2️⃣ Init encryption (same as create API)
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            dek_id = ensure_data_key()
+            request.app.dek_id = dek_id
+
+        # 3️⃣ Call main function 👇
+        result = await import_excel(file_location, request)
+
+        # 4️⃣ Cleanup
+        os.remove(file_location)
+
+        return result
+
+    except Exception as e:
+        print("❌ Upload Error:", e)
+        raise HTTPException(status_code=500, detail="Internal Server Error")

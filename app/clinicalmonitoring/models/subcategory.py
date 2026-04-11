@@ -17,8 +17,8 @@ class SubcategoryDoc(Document, AutoEncryptMixin, AutoDecryptMixin):
 
     # 🔐 Encrypted
     name : Binary
-    description : Binary | None = None
-    content : Binary | None = None
+    # description : Binary | None = None
+    # content : Binary | None = None
 
     # 🟢 Plain searchable (NON-PHI)
     name_search: Annotated[str, Indexed()]

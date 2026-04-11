@@ -95,8 +95,8 @@ async def create_campus_block(
             dek_id,
             {
                 "name": payload.name,
-                "description": payload.description,
-                "content": payload.content,
+                # "description": payload.description,
+                # "content": payload.content,
             }
         )
 
@@ -104,8 +104,8 @@ async def create_campus_block(
         subcategory = SubcategoryDoc(
             category_id = category,
             name=encrypted["name"],
-            description=encrypted["description"],
-            content=encrypted["content"],
+            # description=encrypted["description"],
+            # content=encrypted["content"],
             name_search=normalized_subcategory_name,        # 🔎 search
             created_by=user,
             status="active",
@@ -172,7 +172,7 @@ async def subcategory_list(
         # 3️⃣ Query conditions (Beanie style)
         # ----------------------------
         conditions = [
-            SubcategoryDoc.created_by.id == user.id,
+            # SubcategoryDoc.created_by.id == user.id,
             SubcategoryDoc.is_deleted == False
 
         ]
@@ -218,8 +218,8 @@ async def subcategory_list(
             result.append({
                 "id": str(sub_category.id),
                 "name": decrypt_value(ce, sub_category.name),
-                "description": decrypt_value(ce, sub_category.description),
-                "content": decrypt_value(ce, sub_category.content),
+                # "description": decrypt_value(ce, sub_category.description),
+                # "content": decrypt_value(ce, sub_category.content),
                 "category_id": str(sub_category.category_id.id) if sub_category.category_id else None,
                 "category_name": (
                     sub_category.category_id.name_search
