@@ -405,8 +405,8 @@ async def get_all_templates(
                     data["sub_categories"].append({
                         "id": str(sc.id),
                         "name": decrypt_value(ce, sc.name) if sc.name else None,
-                        "description": decrypt_value(ce, sc.description) if sc.description else None,
-                        "content": decrypt_value(ce, sc.content) if sc.content else None,
+                        # "description": decrypt_value(ce, sc.description) if sc.description else None,
+                        # "content": decrypt_value(ce, sc.content) if sc.content else None,
                     })
 
             result.append(data)

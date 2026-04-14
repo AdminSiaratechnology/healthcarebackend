@@ -23,7 +23,7 @@ router = APIRouter(prefix="/subcategory", tags=["Subcategory"])
 
 
 @router.post("/create/{category_id}/")
-async def create_campus_block(
+async def create_subcategory(
     category_id: str,
     payload: SubcategorySchema,
     request: Request,
@@ -100,12 +100,17 @@ async def create_campus_block(
             }
         )
 
+        if not payload.fields:
+            raise HTTPException(status_code=400, detail="Fields are required")
+
         # 8️⃣ Save
         subcategory = SubcategoryDoc(
             category_id = category,
             name=encrypted["name"],
             # description=encrypted["description"],
             # content=encrypted["content"],
+            # fields=[field.dict() for field in payload.fields], 
+            field=payload.field.model_dump(exclude_none=True) if payload.field else None,
             name_search=normalized_subcategory_name,        # 🔎 search
             created_by=user,
             status="active",
@@ -140,7 +145,6 @@ async def create_campus_block(
     except Exception as e:
         print("❌ Crash:", e)
         raise HTTPException(status_code=500, detail="Internal Server Error")
-
 
 
 
@@ -218,6 +222,7 @@ async def subcategory_list(
             result.append({
                 "id": str(sub_category.id),
                 "name": decrypt_value(ce, sub_category.name),
+                "field": sub_category.field, 
                 # "description": decrypt_value(ce, sub_category.description),
                 # "content": decrypt_value(ce, sub_category.content),
                 "category_id": str(sub_category.category_id.id) if sub_category.category_id else None,
@@ -268,11 +273,8 @@ async def subcategory_list(
 
 
 
-
-
-
 @router.put("/update/{subcategory_id}/")
-async def update_category(
+async def update_subcategory(
     subcategory_id: str,
     payload: SubcategorySchema,
     request: Request,
@@ -302,7 +304,7 @@ async def update_category(
        
         subcategory = await SubcategoryDoc.find_one(
             SubcategoryDoc.id == subcategory_obj_id,
-            SubcategoryDoc.created_by.id == user.id,
+            # SubcategoryDoc.created_by.id == user.id,
             SubcategoryDoc.is_deleted == False,
         )
             
@@ -314,10 +316,25 @@ async def update_category(
         normalized_name_search = payload.name.strip().lower()
 
         # 6️⃣ Duplicate validation
-        if normalized_name_search != SubcategoryDoc.name_search:
+        # if normalized_name_search != SubcategoryDoc.name_search:
+        #     duplicate = await SubcategoryDoc.find_one(
+        #         And(
+        #             # CategoryDoc.facility_id == campus_block.facility_id,
+        #             SubcategoryDoc.name_search == normalized_name_search,
+        #             SubcategoryDoc.is_deleted == False,
+        #             SubcategoryDoc.id != subcategory.id,
+        #         )
+        #     )
+
+        #     if duplicate:
+        #         raise HTTPException(
+        #             status_code=400,
+        #             detail="subcategory name already exists ",
+        #         )
+
+        if normalized_name_search != subcategory.name_search:
             duplicate = await SubcategoryDoc.find_one(
                 And(
-                    # CategoryDoc.facility_id == campus_block.facility_id,
                     SubcategoryDoc.name_search == normalized_name_search,
                     SubcategoryDoc.is_deleted == False,
                     SubcategoryDoc.id != subcategory.id,
@@ -327,7 +344,7 @@ async def update_category(
             if duplicate:
                 raise HTTPException(
                     status_code=400,
-                    detail="subcategory name already exists ",
+                    detail="subcategory name already exists",
                 )
 
         # 7️⃣ Encrypt & update
@@ -336,16 +353,21 @@ async def update_category(
             dek_id,
             {
                 "subcategory_name": payload.name,
-                "description": payload.description,
-                "content": payload.content,
+                # "description": payload.description,
+                # "content": payload.content,
                 
             },
         )
 
         subcategory.name = encrypted["subcategory_name"]
-        subcategory.description = encrypted["description"]
-        subcategory.content = encrypted["content"]
+        # subcategory.description = encrypted["description"]
+        # subcategory.content = encrypted["content"]
         subcategory.name_search = normalized_name_search
+
+
+        if payload.field is not None:
+            subcategory.field = payload.field.model_dump(exclude_none=True)
+
         subcategory.updated_at = datetime.now(timezone.utc)
 
         await subcategory.save()

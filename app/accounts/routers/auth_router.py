@@ -821,7 +821,8 @@ async def forgot_password_request(payload: ForgotPasswordRequest, request: Reque
         resource="auth",
         resource_id=str(user.id),
         status="success",
-        notes="OTP sent"
+        notes="OTP sent",
+        user_id=str(user.id)
     )
     return {"message": "OTP sent", "reset_id": str(reset.id)}
 

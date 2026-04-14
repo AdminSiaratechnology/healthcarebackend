@@ -1,3 +1,5 @@
+from typing import Any, Dict, List, Optional
+
 from beanie import Document, Link, Indexed
 from bson import Binary
 from datetime import datetime, timezone
@@ -19,6 +21,10 @@ class SubcategoryDoc(Document, AutoEncryptMixin, AutoDecryptMixin):
     name : Binary
     # description : Binary | None = None
     # content : Binary | None = None
+
+    # fields: List[Dict[str, Any]]
+    # fields: Optional[List[Dict[str, Any]]] = None
+    field: Optional[Dict[str, Any]] = None
 
     # 🟢 Plain searchable (NON-PHI)
     name_search: Annotated[str, Indexed()]

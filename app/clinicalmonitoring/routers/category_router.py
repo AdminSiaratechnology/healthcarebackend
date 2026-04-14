@@ -520,6 +520,7 @@ async def get_all_categories(
             subcategory_map.setdefault(cat_id, []).append({
                 "id": str(sub.id),
                 "name": decrypt_value(ce, sub.name),
+                "field": sub.field,
                 # "content": decrypt_value(ce, sub.content),
                 # "description": decrypt_value(ce, sub.description),
                 "status": sub.status,
@@ -777,10 +778,21 @@ async def import_excel(file_path: str, request):
                 {"subcategory_name": subcategory_name}
             )
 
+            # 
             subcategory = SubcategoryDoc(
                 category_id=category,
                 name_search=subcategory_key,
                 name=encrypted_sub["subcategory_name"],
+                # fields=[
+                #     {
+                #         "name": subcategory_name,   # 👈 same as subcategory
+                #         "type": "text"              # 👈 default
+                #     }
+                # ],
+                field={
+                    "name": subcategory_name.lower().replace(" ", "_"),
+                    "type": "text"
+                },
                 status="active",
                 is_deleted=False,
                 created_at=datetime.now(timezone.utc),
@@ -793,19 +805,6 @@ async def import_excel(file_path: str, request):
 
 
 
-# @router.post("/upload-template")
-# async def upload_template(file: UploadFile = File(...)):
-#     file_location = f"temp_{file.filename}"
-
-#     with open(file_location, "wb") as f:
-#         f.write(await file.read())
-
-#     result = await import_excel(file_location)
-
-#     # 🧹 optional cleanup
-#     os.remove(file_location)
-
-#     return result
 
 
 @router.post("/upload-template")
