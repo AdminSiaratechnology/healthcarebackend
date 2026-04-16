@@ -10,6 +10,7 @@ from app.patients.models.patients import PatientDoc
 from app.facility.models.facility import Facility
 from app.provider.models.providers import Provider
 from typing_extensions import Annotated
+
 class TemplateBuilderDoc(Document, AutoEncryptMixin, AutoDecryptMixin):
 
     # 🔗 Relations

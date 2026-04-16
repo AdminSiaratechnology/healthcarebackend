@@ -4,6 +4,7 @@ from pydantic import ValidationError
 from app.accounts.models.user import UserDoc
 from app.auth.deps import get_current_user_id
 from app.encryption.encryption import encrypt_value, decrypt_value, init_encryption, ensure_data_key, encrypt_value_deterministic, encrypt_dict
+from app.provider.models.providers import Provider
 from app.utils.audit import log_audit
 from app.schemas.clinicalmonitoring.template_builder import TemplateBuilderSchema, TemplateBuilderUpdateSchema
 from beanie import PydanticObjectId, WriteRules
@@ -277,6 +278,153 @@ async def create_template(
 
 
 
+# @router.get("/get_all/")
+# async def get_all_templates(
+#     request: Request,
+#     skip: int = Query(0, ge=0),
+#     limit: int = Query(10, ge=1),
+#     name_search: Optional[str] = Query(None),
+#     current_user_id: str = Depends(get_current_user_id),
+# ):
+#     try:
+#         # 🔹 1️⃣ Get User
+#         user = await UserDoc.get(current_user_id)
+#         if not user:
+#             raise HTTPException(status_code=404, detail="User not found")
+
+#         # 🔹 2️⃣ Encryption Init
+#         ce = getattr(request.app, "client_encryption", None)
+#         if ce is None:
+#             ce = init_encryption()
+#             request.app.client_encryption = ce
+
+#         # 🔹 3️⃣ Base Filters
+#         base_filters = [
+#             TemplateBuilderDoc.is_deleted == False,
+#             TemplateBuilderDoc.created_by.id == user.id
+#         ]
+
+#         # 🔹 4️⃣ Search Logic
+#         if name_search:
+#             search_value = name_search.strip().lower()
+
+#             # 4️⃣.1 Category search
+#             categories = await CategoryDoc.find(
+#                 CategoryDoc.is_deleted == False,
+#                 RegEx(CategoryDoc.name_search, search_value, options="i")
+#             ).to_list()
+
+#             category_ids = [c.id for c in categories]
+
+#             subcategory_ids = []
+
+#             if category_ids:
+#                 subcategories = await SubcategoryDoc.find(
+#                     SubcategoryDoc.is_deleted == False,
+#                     In(SubcategoryDoc.category_id.id, category_ids)
+#                 ).to_list()
+
+#                 subcategory_ids = [sc.id for sc in subcategories]
+
+#             # 4️⃣.2 Build OR conditions
+#             or_conditions = [
+#                 RegEx(TemplateBuilderDoc.name_search, search_value, options="i")
+#             ]
+
+#             if subcategory_ids:
+#                 or_conditions.append(
+#                     In(TemplateBuilderDoc.sub_category_ids.id, subcategory_ids)
+#                 )
+
+#             query = TemplateBuilderDoc.find(
+#                 *base_filters,
+#                 Or(*or_conditions)
+#             )
+
+#         else:
+#             query = TemplateBuilderDoc.find(*base_filters)
+
+#         # 🔹 5️⃣ Count
+#         total_count = await query.count()
+
+#         # 🔹 6️⃣ Fetch paginated IDs first
+#         templates = await query.skip(skip).limit(limit).to_list()
+
+#         template_ids = [t.id for t in templates]
+
+#         if not template_ids:
+
+#             try:
+#                 await log_audit(
+#                     request=request,
+#                     user_id=str(user.id),
+#                     action="READ",
+#                     resource="template_builder",
+#                     resource_id="List",
+#                     status="success",
+#                 )
+#             except Exception:
+#                 pass
+
+#             return {
+#                 "success": True,
+#                 "total": 0,
+#                 "skip": skip,
+#                 "limit": limit,
+#                 "data": []
+#             }
+
+           
+
+#         # 🔹 7️⃣ Fetch with links
+#         templates_with_links = await TemplateBuilderDoc.find(
+#             In(TemplateBuilderDoc.id, template_ids),
+#             fetch_links=True
+#         ).to_list()
+
+#         # 🔹 8️⃣ Maintain Order
+#         template_map = {t.id: t for t in templates_with_links}
+#         ordered_templates = [template_map[t_id] for t_id in template_ids if t_id in template_map]
+
+#         # 🔹 9️⃣ Prepare Response
+#         result = []
+
+#         for t in ordered_templates:
+#             data = {
+#                 "id": str(t.id),
+#                 "template_name": decrypt_value(ce, t.template_name) if t.template_name else None,
+#                 "short_name": decrypt_value(ce, t.short_name) if t.short_name else None,
+#                 "discipline": decrypt_value(ce, t.discipline) if t.discipline else None,
+#                 "created_at": t.created_at,
+#                 "updated_at": t.updated_at,
+#                 "status": t.status,
+#                 "sub_categories": []
+#             }
+
+#             if t.sub_category_ids:
+#                 for sc in t.sub_category_ids:
+#                     data["sub_categories"].append({
+#                         "id": str(sc.id),
+#                         "name": decrypt_value(ce, sc.name) if sc.name else None,
+#                         # "description": decrypt_value(ce, sc.description) if sc.description else None,
+#                         # "content": decrypt_value(ce, sc.content) if sc.content else None,
+#                     })
+
+#             result.append(data)
+
+#         return {
+#             "success": True,
+#             "total": total_count,
+#             "skip": skip,
+#             "limit": limit,
+#             "data": result
+#         }
+
+#     except Exception as e:
+#         print("❌ Crash:", e)
+#         raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
 @router.get("/get_all/")
 async def get_all_templates(
     request: Request,
@@ -297,17 +445,36 @@ async def get_all_templates(
             ce = init_encryption()
             request.app.client_encryption = ce
 
-        # 🔹 3️⃣ Base Filters
-        base_filters = [
-            TemplateBuilderDoc.is_deleted == False,
-            TemplateBuilderDoc.created_by.id == user.id
-        ]
+        # 🔹 3️⃣ Check Provider
+        provider = await Provider.find_one(
+            Provider.user.id == user.id,
+            Provider.is_deleted == False
+        )
 
-        # 🔹 4️⃣ Search Logic
+
+        # 🔹 4️⃣ Base Filters (UPDATED FOR PROVIDER SUPPORT)
+
+        if provider:
+            if not provider.created_by:
+                raise HTTPException(status_code=400, detail="Provider has no creator")
+
+            base_filters = [
+                TemplateBuilderDoc.is_deleted == False,
+                TemplateBuilderDoc.created_by != None,
+                TemplateBuilderDoc.created_by == provider.created_by
+            ]
+        else:
+            base_filters = [
+                TemplateBuilderDoc.is_deleted == False,
+                TemplateBuilderDoc.created_by != None,
+                TemplateBuilderDoc.created_by.id == user.id
+            ]
+
+        # 🔹 5️⃣ Search Logic
         if name_search:
             search_value = name_search.strip().lower()
 
-            # 4️⃣.1 Category search
+            # 5️⃣.1 Category search
             categories = await CategoryDoc.find(
                 CategoryDoc.is_deleted == False,
                 RegEx(CategoryDoc.name_search, search_value, options="i")
@@ -325,7 +492,7 @@ async def get_all_templates(
 
                 subcategory_ids = [sc.id for sc in subcategories]
 
-            # 4️⃣.2 Build OR conditions
+            # 5️⃣.2 OR conditions
             or_conditions = [
                 RegEx(TemplateBuilderDoc.name_search, search_value, options="i")
             ]
@@ -343,12 +510,11 @@ async def get_all_templates(
         else:
             query = TemplateBuilderDoc.find(*base_filters)
 
-        # 🔹 5️⃣ Count
+        # 🔹 6️⃣ Count
         total_count = await query.count()
 
-        # 🔹 6️⃣ Fetch paginated IDs first
+        # 🔹 7️⃣ Pagination fetch
         templates = await query.skip(skip).limit(limit).to_list()
-
         template_ids = [t.id for t in templates]
 
         if not template_ids:
@@ -373,19 +539,17 @@ async def get_all_templates(
                 "data": []
             }
 
-           
-
-        # 🔹 7️⃣ Fetch with links
+        # 🔹 8️⃣ Fetch with links
         templates_with_links = await TemplateBuilderDoc.find(
             In(TemplateBuilderDoc.id, template_ids),
             fetch_links=True
         ).to_list()
 
-        # 🔹 8️⃣ Maintain Order
+        # 🔹 9️⃣ Maintain Order
         template_map = {t.id: t for t in templates_with_links}
         ordered_templates = [template_map[t_id] for t_id in template_ids if t_id in template_map]
 
-        # 🔹 9️⃣ Prepare Response
+        # 🔹 🔟 Response
         result = []
 
         for t in ordered_templates:
@@ -405,8 +569,6 @@ async def get_all_templates(
                     data["sub_categories"].append({
                         "id": str(sc.id),
                         "name": decrypt_value(ce, sc.name) if sc.name else None,
-                        # "description": decrypt_value(ce, sc.description) if sc.description else None,
-                        # "content": decrypt_value(ce, sc.content) if sc.content else None,
                     })
 
             result.append(data)
@@ -420,9 +582,12 @@ async def get_all_templates(
         }
 
     except Exception as e:
-        print("❌ Crash:", e)
+        import traceback
+        print("❌ Crash:")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
+        
 @router.put("/update/{template_id}")
 async def update_template(
     template_id: str,
