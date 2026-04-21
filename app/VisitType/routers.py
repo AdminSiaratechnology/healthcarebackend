@@ -84,7 +84,7 @@ async def get_visit_type(
     return visit_type
 
 
-@router.patch("/{id}", response_model=VisitTypeResponse)
+@router.put("/{id}", response_model=VisitTypeResponse)
 async def update_visit_type(
     id: PydanticObjectId,
     payload: VisitTypeUpdate,
