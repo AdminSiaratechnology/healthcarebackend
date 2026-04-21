@@ -56,6 +56,7 @@ from app.PatientNotes.models.notes import PatientNotesDoc
 from  app.ShiftManagement.models.shift import ShiftManagementDocs
 from app.FacilityRole.models.user_facility_role import UserFacilityRole
 from app.scheduler.models import Scheduler
+from app.VisitType.models import VisitType
 
 
 from app.utils.audit import AuditLog
@@ -121,9 +122,10 @@ async def startup_app(app):
             PatientNotesDoc,
             ShiftManagementDocs,
             UserFacilityRole,
-            Scheduler
+            Scheduler,
+            VisitType
         ]
-        )
+    )
      # Encryption init
     app.client_encryption = init_encryption()
     app.dek_id = ensure_data_key()

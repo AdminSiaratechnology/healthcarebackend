@@ -51,6 +51,7 @@ from app.PatientNotes.routers.notes_router import router as notes_router
 from app.ShiftManagement.routers.shift_router import router as shiftmanagement_router
 from app.FacilityRole.routers.user_facility_router import router as user_facility_router
 from app.scheduler.routers import router as scheduler_router
+from app.VisitType.routers import router as visit_type_router
 
 
 
@@ -147,6 +148,7 @@ app.include_router(template_builder_router)
 # --------------------------- Scheduler ------------------------------------
 
 app.include_router(schedule_router)
+app.include_router(visit_type_router)
 
 
 # --------------------------- Prescription ------------------------------------
