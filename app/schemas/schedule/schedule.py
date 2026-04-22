@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
 from enum import Enum, IntEnum
 from datetime import date,time,datetime, timezone
-
+from beanie import PydanticObjectId
 
 
     
@@ -23,6 +23,7 @@ class PatientScheduleItem(BaseModel):
 class ScheduleSchema(BaseModel):
     facility_id: str
     provider_id: str
+    visit_type_id: PydanticObjectId # Add visit_type_id
     start_datetime: datetime
     slot_duration_minutes: SlotDurationEnum
     patients: List[PatientScheduleItem]

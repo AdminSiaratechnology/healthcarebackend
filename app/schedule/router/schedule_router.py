@@ -11,6 +11,7 @@ from app.accounts.models.user import UserRole
 from app.utils.audit import log_audit
 from app.schemas.schedule.schedule import ScheduleSchema
 from app.provider.models.providers import Provider
+from app.VisitType.models import VisitType # Import VisitType
 from beanie import PydanticObjectId, Link
 from beanie.operators import In
 import json
@@ -355,14 +356,27 @@ async def create_schedule(
             raise HTTPException(status_code=404, detail="Provider not found")
 
         # --------------------------------------------------
-        # 4️⃣ Validate Patients
+        # --------------------------------------------------
+        # 4️⃣ VisitType Validation
+        # --------------------------------------------------
+        try:
+            visit_type_obj_id = ObjectId(payload.visit_type_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid visit_type_id")
+
+        visit_type = await VisitType.get(visit_type_obj_id)
+        if not visit_type:
+            raise HTTPException(status_code=404, detail="VisitType not found")
+
+        # --------------------------------------------------
+        # 5️⃣ Validate Patients
         # --------------------------------------------------
         patient_object_ids: List[ObjectId] = []
 
         for item in payload.patients:
             try:
                 patient_object_ids.append(ObjectId(item.patient_id))
-            except:
+            except Exception:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Invalid patient_id: {item.patient_id}",
@@ -426,6 +440,7 @@ async def create_schedule(
                 facility_id=facility,
                 provider_id=provider,
                 patient_id=patient,
+                visit_type=visit_type, # Add visit_type
                 appointment_datetime=appointment_time,
                 created_by=user,
                 notes=item.notes,
@@ -518,7 +533,19 @@ async def update_schedule(
             raise HTTPException(status_code=404, detail="Provider not found")
 
         # --------------------------------------------------
-        # 5️⃣ Patient Validation (Update specific schedule uses first patient in payload)
+        # 5️⃣ VisitType Validation
+        # --------------------------------------------------
+        try:
+            visit_type_obj_id = ObjectId(payload.visit_type_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid visit_type_id")
+
+        visit_type = await VisitType.get(visit_type_obj_id)
+        if not visit_type:
+            raise HTTPException(status_code=404, detail="VisitType not found")
+
+        # --------------------------------------------------
+        # 6️⃣ Patient Validation (Update specific schedule uses first patient in payload)
         # --------------------------------------------------
         if not payload.patients:
             raise HTTPException(status_code=400, detail="Patient information required")
@@ -564,10 +591,10 @@ async def update_schedule(
         schedule.facility_id = facility
         schedule.provider_id = provider
         schedule.patient_id = patient
-        schedule.appointment_datetime = appointment_time
+        schedule.visit_type = visit_type # Update visit_type
+        schedule.appointment_datetime = payload.start_datetime.astimezone(timezone.utc)
         schedule.notes = patient_item.notes
         schedule.updated_at = datetime.now(timezone.utc)
-
         await schedule.save()
 
         return {
