@@ -14,6 +14,7 @@ class SlotDurationEnum(IntEnum):
 
 class PatientScheduleItem(BaseModel):
     patient_id: str
+    visit_type_id: PydanticObjectId
     notes: Optional[str] = Field(
         default=None,
         max_length=1000,
@@ -23,7 +24,6 @@ class PatientScheduleItem(BaseModel):
 class ScheduleSchema(BaseModel):
     facility_id: str
     provider_id: str
-    visit_type_id: PydanticObjectId # Add visit_type_id
     start_datetime: datetime
     slot_duration_minutes: SlotDurationEnum
     patients: List[PatientScheduleItem]

@@ -357,19 +357,7 @@ async def create_schedule(
 
         # --------------------------------------------------
         # --------------------------------------------------
-        # 4️⃣ VisitType Validation
-        # --------------------------------------------------
-        try:
-            visit_type_obj_id = ObjectId(payload.visit_type_id)
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid visit_type_id")
-
-        visit_type = await VisitType.get(visit_type_obj_id)
-        if not visit_type:
-            raise HTTPException(status_code=404, detail="VisitType not found")
-
-        # --------------------------------------------------
-        # 5️⃣ Validate Patients
+        # 4️⃣ Validate Patients
         # --------------------------------------------------
         patient_object_ids: List[ObjectId] = []
 
@@ -416,6 +404,16 @@ async def create_schedule(
                     status_code=400,
                     detail=f"Patient not found: {item.patient_id}",
                 )
+
+            # 🔗 VisitType Validation (Per Patient)
+            try:
+                visit_type_obj_id = ObjectId(item.visit_type_id)
+            except Exception:
+                raise HTTPException(status_code=400, detail=f"Invalid visit_type_id for patient {item.patient_id}")
+
+            visit_type = await VisitType.get(visit_type_obj_id)
+            if not visit_type:
+                raise HTTPException(status_code=404, detail=f"VisitType not found for patient {item.patient_id}")
 
             appointment_time = start_datetime + timedelta(
                 minutes=slot_duration * index
@@ -533,19 +531,7 @@ async def update_schedule(
             raise HTTPException(status_code=404, detail="Provider not found")
 
         # --------------------------------------------------
-        # 5️⃣ VisitType Validation
-        # --------------------------------------------------
-        try:
-            visit_type_obj_id = ObjectId(payload.visit_type_id)
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid visit_type_id")
-
-        visit_type = await VisitType.get(visit_type_obj_id)
-        if not visit_type:
-            raise HTTPException(status_code=404, detail="VisitType not found")
-
-        # --------------------------------------------------
-        # 6️⃣ Patient Validation (Update specific schedule uses first patient in payload)
+        # 5️⃣ Patient & VisitType Validation (Update specific schedule uses first patient in payload)
         # --------------------------------------------------
         if not payload.patients:
             raise HTTPException(status_code=400, detail="Patient information required")
@@ -564,6 +550,16 @@ async def update_schedule(
 
         if not patient:
             raise HTTPException(status_code=404, detail="Patient not found")
+
+        # 🔗 VisitType Validation
+        try:
+            visit_type_obj_id = ObjectId(patient_item.visit_type_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid visit_type_id")
+
+        visit_type = await VisitType.get(visit_type_obj_id)
+        if not visit_type:
+            raise HTTPException(status_code=404, detail="VisitType not found")
 
         # --------------------------------------------------
         # 6️⃣ Double Booking Check (Ignore current schedule)
