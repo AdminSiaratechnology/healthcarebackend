@@ -615,8 +615,9 @@ async def update_provider(
         # 3️⃣ Update Facilities if provided
         if facility_ids:
             try:
+                # Handle spaces after commas and filter out empty strings
                 facility_object_ids = [
-                    ObjectId(fid.strip()) for fid in facility_ids.split(",")
+                    ObjectId(fid.strip()) for fid in facility_ids.split(",") if fid.strip()
                 ]
             except Exception:
                 raise HTTPException(400, "Invalid facility_ids format")
@@ -830,20 +831,28 @@ async def get_my_provider_schedules(
         )
 
         # 5️⃣ Response
-        result = []
+        grouped_data = {}
         for sch in schedules:
             facility_info = None
+            fac_id = "unknown"
             if sch.facility_id:
                 fac = sch.facility_id
                 if hasattr(fac, "fetch") and not hasattr(fac, "facility_name_search"):
                     fac = await fac.fetch()
                 
                 if fac:
+                    fac_id = str(fac.id)
                     facility_info = {
-                        "id": str(fac.id),
+                        "id": fac_id,
                         "facility_name_search": getattr(fac, "facility_name_search", None),
                         "status": fac.status,
                     }
+
+            if fac_id not in grouped_data:
+                grouped_data[fac_id] = {
+                    "facility": facility_info,
+                    "schedules": []
+                }
 
             patient_details = {}
             if sch.patient_id:
@@ -901,10 +910,9 @@ async def get_my_provider_schedules(
                     "room": room_details,
                 }
 
-            result.append({
+            grouped_data[fac_id]["schedules"].append({
                 "id": str(sch.id),
                 "provider": {"id": str(provider.id)},
-                "facility": facility_info,
                 "visit_type": {
                     "id": str(sch.visit_type.id),
                     "name": sch.visit_type.name
@@ -917,14 +925,16 @@ async def get_my_provider_schedules(
                 "updated_at": sch.updated_at,
             })
 
+        result = list(grouped_data.values())
+
         return {
             "success": True,
             "page": page,
             "page_size": page_size,
             "total_pages": (total + page_size - 1) // page_size,
-            "count": len(result),
-            "total": total,
-            "schedules": result,
+            "total_schedules": total,
+            "count": len(schedules),
+            "data": result,
         }
 
     except HTTPException:
