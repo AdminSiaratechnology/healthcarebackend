@@ -905,8 +905,13 @@ async def get_my_provider_schedules(
                 "id": str(sch.id),
                 "provider": {"id": str(provider.id)},
                 "facility": facility_info,
+                "visit_type": {
+                    "id": str(sch.visit_type.id),
+                    "name": sch.visit_type.name
+                } if sch.visit_type else None,
                 "appointment_datetime": sch.appointment_datetime.isoformat() if sch.appointment_datetime else None,
                 "status": sch.status,
+                "notes": sch.notes,
                 "patient": patient_details,
                 "created_at": sch.created_at,
                 "updated_at": sch.updated_at,

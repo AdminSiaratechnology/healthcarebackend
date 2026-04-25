@@ -175,12 +175,7 @@ router = APIRouter(prefix="/schedule", tags=["Schedule"])
 
 
 
-
-
 from datetime import datetime, timedelta, timezone
-
-
-
 
 
 # @router.post("/create/")
@@ -310,6 +305,7 @@ from datetime import datetime, timedelta, timezone
 #             status_code=500,
 #             detail="Internal Server Error while creating schedule",
 #         )
+
 
 @router.post("/create/")
 async def create_schedule(
