@@ -52,7 +52,7 @@ from app.ShiftManagement.routers.shift_router import router as shiftmanagement_r
 from app.FacilityRole.routers.user_facility_router import router as user_facility_router
 from app.scheduler.routers import router as scheduler_router
 from app.VisitType.routers import router as visit_type_router
-from app.reports.routers import router as llm_router
+# from app.reports.routers import router as llm_router
 
 
 
@@ -179,7 +179,7 @@ app.include_router(scheduler_router)
 
 # ----------------------- LLM ROUTER FOR AI -----------------------------------------------------
 
-app.include_router(llm_router)
+# app.include_router(llm_router)
 
 
 
