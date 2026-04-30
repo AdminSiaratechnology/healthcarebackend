@@ -1,47 +1,47 @@
-# app/services/llm_service.py
-
-from openai import AsyncOpenAI
+from google import genai
 import json
+import re
 
-client = AsyncOpenAI(api_key="YOUR_API_KEY")
+from app.database.config import settings
+
+
+# ✅ new client
+client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
 
 def build_prompt(text: str, subcat_names: list[str]) -> str:
     return f"""
 You are a medical assistant.
 
-Your task is to extract and map the given clinical text into the provided sections.
+Extract and map the clinical text into these sections:
 
-Sections:
 {subcat_names}
 
 Rules:
-- Only use the given section names as keys
-- If information belongs to a section, put it there
-- If not found, return empty string ""
-- Do not create extra keys
-- Keep answers short and relevant
+- Only use given section names
+- If not found, return ""
+- Return STRICT JSON only
 
 Text:
 {text}
-
-Output JSON only.
 """
 
 
 async def call_llm(prompt: str) -> dict:
-    response = await client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are a medical data extractor."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0
-    )
-
-    content = response.choices[0].message.content
-
     try:
-        return json.loads(content)
-    except:
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",  # ✅ FIXED MODEL
+            contents=prompt,
+        )
+
+        text = response.text
+
+        # 🔥 remove markdown
+        text = re.sub(r"```json|```", "", text).strip()
+
+        return json.loads(text)
+
+    except Exception as e:
+        print("LLM ERROR:", e)
         return {}
+

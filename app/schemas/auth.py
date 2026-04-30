@@ -15,6 +15,8 @@ class TokenResponse(BaseModel):
     token_type: str
     is_google_auth_enabled: bool = False
     role : Optional[str] = None
+    full_name: Optional[str] = None
+    email: Optional[EmailStr] = None
 
 class ProfileResponse(BaseModel):
     id: str

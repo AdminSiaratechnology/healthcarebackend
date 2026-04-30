@@ -396,6 +396,8 @@ async def verify_google_auth(
         role=decrypted_role,
         is_google_auth_enabled=user.is_google_auth_enabled,
         user_id=str(user.id),
+        full_name = _decrypt_to_str(request.app.client_encryption, user.full_name),
+        email = _decrypt_to_str(request.app.client_encryption, user.email),
     )
 
 

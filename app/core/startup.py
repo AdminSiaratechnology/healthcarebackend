@@ -57,6 +57,7 @@ from  app.ShiftManagement.models.shift import ShiftManagementDocs
 from app.FacilityRole.models.user_facility_role import UserFacilityRole
 from app.scheduler.models import Scheduler
 from app.VisitType.models import VisitType
+from app.reports.models import PatientReportDoc
 
 
 from app.utils.audit import AuditLog
@@ -123,7 +124,8 @@ async def startup_app(app):
             ShiftManagementDocs,
             UserFacilityRole,
             Scheduler,
-            VisitType
+            VisitType,
+            PatientReportDoc
         ]
     )
      # Encryption init

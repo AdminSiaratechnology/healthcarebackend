@@ -14,18 +14,32 @@ pymongo_key_vault = pymongo_client[settings.KEY_VAULT_DB][settings.KEY_VAULT_COL
 print("Pymongo MongoClient initialized for ClientEncryption.")
 
 
+# def get_kms_providers():
+#     if settings.AWS_ACCESS_KEY_ID:
+#         return {
+#             "aws": {
+#                 "accessKeyId": settings.AWS_ACCESS_KEY_ID,
+#                 "secretAccessKey": settings.AWS_SECRET_ACCESS_KEY
+#             }
+#         }
+#     return { "aws": {"accessKeyId": None, "secretAccessKey": None} }
+
+
 def get_kms_providers():
-    if settings.AWS_ACCESS_KEY_ID:
+    if settings.USE_AWS_KMS:
         return {
             "aws": {
                 "accessKeyId": settings.AWS_ACCESS_KEY_ID,
                 "secretAccessKey": settings.AWS_SECRET_ACCESS_KEY
             }
         }
-    return { "aws": {"accessKeyId": None, "secretAccessKey": None} }
-
-
-
+    else:
+        # dummy provider (no AWS call)
+        return {
+            "local": {
+                "key": b"0" * 96  # static local master key
+            }
+        }
 
 def init_encryption():  
     kms_providers = get_kms_providers()
@@ -37,25 +51,51 @@ def init_encryption():
     )
 
 
+# def ensure_data_key():
+#     existing = pymongo_key_vault.find_one({"keyAltNames": DEK_KEY_ALT_NAME})
+#     if existing:
+#         return existing["_id"]
+
+#     client_encryption = init_encryption()
+#     master_key = {
+#         "region": settings.AWS_REGION,
+#         "key": settings.KMS_KEY_ARN
+#     }
+
+#     dek_id = client_encryption.create_data_key(
+#         "aws",
+#         master_key=master_key,
+#         key_alt_names=[DEK_KEY_ALT_NAME]
+#     )
+#     client_encryption.close()
+#     return dek_id
+
+
 def ensure_data_key():
     existing = pymongo_key_vault.find_one({"keyAltNames": DEK_KEY_ALT_NAME})
     if existing:
         return existing["_id"]
 
     client_encryption = init_encryption()
-    master_key = {
-        "region": settings.AWS_REGION,
-        "key": settings.KMS_KEY_ARN
-    }
+
+    if settings.USE_AWS_KMS:
+        master_key = {
+            "region": settings.AWS_REGION,
+            "key": settings.KMS_KEY_ARN
+        }
+        provider = "aws"
+    else:
+        master_key = None
+        provider = "local"
 
     dek_id = client_encryption.create_data_key(
-        "aws",
+        provider,
         master_key=master_key,
         key_alt_names=[DEK_KEY_ALT_NAME]
     )
+
     client_encryption.close()
     return dek_id
-
 
 def encrypt_value(client_encryption, key_id, value):
     return client_encryption.encrypt(

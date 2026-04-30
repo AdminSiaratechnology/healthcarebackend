@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     MONGO_URI: str
     DB_NAME: str
+    GEMINI_API_KEY: str
     KEY_VAULT_DB: str
     KEY_VAULT_COLL: str
     AWS_REGION: str
@@ -20,6 +21,7 @@ class Settings(BaseSettings):
     SMTP_PASS: str | None = None
     SMTP_FROM: str | None = None
     SMTP_FROM_NAME: str | None = None
+    USE_AWS_KMS: bool = False
     model_config = SettingsConfigDict(  
         env_file=".env",
         env_file_encoding='utf-8',
