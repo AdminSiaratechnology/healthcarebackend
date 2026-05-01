@@ -266,9 +266,16 @@ async def update_campus_block(
         # 3️⃣ Validate ID
         try:
             block_obj_id = PydanticObjectId(block_id)
+            facility_obj_id = PydanticObjectId(facility_id)
             
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid Campus Block ID")
+        
+        # ✅ ADD THIS BLOCK
+        facility = await Facility.get(facility_obj_id)
+        if not facility:
+            raise HTTPException(status_code=404, detail="Facility not found")
+        
 
         # 4️⃣ Fetch block (Beanie-correct)
         campus_block = await CampusBlock.find_one(
