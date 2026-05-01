@@ -15,5 +15,5 @@ class SubcategorySchema(BaseModel):
     # description :Optional[str] = None
     # content : Optional[str] = None
     # fields: List[FieldSchema]
-    field: Optional[FieldSchema] = None 
+    # field: Optional[FieldSchema] = None 
 

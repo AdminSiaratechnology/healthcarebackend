@@ -369,10 +369,11 @@ async def get_all_campus_blocks(
 
 
 @router.put("/update/{department_id}/")
-async def update_campus_block(
+async def update_department(
     department_id: str,
     payload: DepartmentSchema,
     request: Request,
+    facility_id: Optional[str] = Query(None),
     current_user_id: str = Depends(get_current_user_id),
 ):
     try:
@@ -410,16 +411,42 @@ async def update_campus_block(
             raise HTTPException(status_code=404, detail="Campus block not found")
 
         # 5️⃣ Normalize name
-        normalized_name = payload.code.strip().lower()
-        normalized_code = payload.code.strip().lower()
-        normalized_type = payload.code.strip().lower()
+        normalized_name = payload.name.strip().lower() if payload.name else fac_dept.department_search
+        normalized_code = payload.code.strip().lower() if payload.code else fac_dept.code_search
+        normalized_type = payload.code.strip().lower() if payload.code else fac_dept.type_search
+
+        # 5.1️⃣ Handle facility_id update
+        new_facility_id_obj = fac_dept.facility_id.ref.id
+        new_facility_doc = fac_dept.facility_id
+        facility_changed = False
+        if facility_id:
+            try:
+                target_facility_obj_id = PydanticObjectId(facility_id)
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid target Facility ID format")
+
+            # Verify target facility exists and belongs to user
+            target_facility = await Facility.find_one(
+                Facility.id == target_facility_obj_id,
+                Facility.created_by.id == user.id
+            )
+            if not target_facility:
+                raise HTTPException(status_code=404, detail="Target Facility not found or access denied")
+            
+            # Check if it's actually different
+            if str(fac_dept.facility_id.ref.id) != facility_id:
+                new_facility_id_obj = target_facility.id
+                new_facility_doc = target_facility
+                facility_changed = True
 
         # 6️⃣ Duplicate validation
-        if normalized_name != FacilityDepartment.department_search:
+        name_changed = normalized_name != fac_dept.department_search
+        code_changed = normalized_code != fac_dept.code_search
+
+        if name_changed or code_changed or facility_changed:
             duplicate = await FacilityDepartment.find_one(
                 And(
-                    FacilityDepartment.facility_id == fac_dept.facility_id,
-                    FacilityDepartment.department_search == normalized_name,
+                    FacilityDepartment.facility_id.id == new_facility_id_obj,
                     FacilityDepartment.is_deleted == False,
                     FacilityDepartment.id != fac_dept.id,
                     Or(
@@ -447,6 +474,7 @@ async def update_campus_block(
             }
         )
 
+        fac_dept.facility_id = new_facility_doc
         fac_dept.code = encrypted["department_code"]
         fac_dept.department_name = encrypted["department_name"]
         fac_dept.type = encrypted["department_type"]

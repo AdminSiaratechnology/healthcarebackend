@@ -495,16 +495,40 @@ async def update_floor(
     
 
     # 5️⃣ Normalize name
-
-
     normalized_floor_label = payload.floor_label.strip().lower()
-    # 6️⃣ Duplicate validation
 
-    if normalized_floor_label != floors.floor_label_search:
+    # 5.1️⃣ Handle facility_id update
+    new_facility_id_obj = floors.facility_id.ref.id
+    new_facility_doc = floors.facility_id # Keep the link/doc for saving later
+    facility_changed = False
+    if payload.facility_id:
+        try:
+            target_facility_obj_id = PydanticObjectId(payload.facility_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid target Facility ID format")
+
+        # Verify target facility exists and belongs to user
+        target_facility = await Facility.find_one(
+            Facility.id == target_facility_obj_id,
+            Facility.created_by.id == user.id
+        )
+        if not target_facility:
+            raise HTTPException(status_code=404, detail="Target Facility not found or access denied")
+        
+        # Check if it's actually different
+        if str(floors.facility_id.ref.id) != payload.facility_id:
+            new_facility_id_obj = target_facility.id
+            new_facility_doc = target_facility
+            facility_changed = True
+
+    # 6️⃣ Duplicate validation
+    label_changed = normalized_floor_label != floors.floor_label_search
+
+    if label_changed or facility_changed:
 
         duplicate = await FacilityFloor.find_one(
             And(
-                FacilityFloor.facility_id == floors.facility_id,
+                FacilityFloor.facility_id.id == new_facility_id_obj,
                 FacilityFloor.floor_label_search == normalized_floor_label,
                 FacilityFloor.is_deleted == False,
                 FacilityFloor.id != floors.id,
@@ -530,6 +554,7 @@ async def update_floor(
             },
         )
 
+        floors.facility_id = new_facility_doc
         floors.floor_label = encrypted["floor_label"]
         floors.display = encrypted["display"]
         floors.floor_label_search = normalized_floor_label

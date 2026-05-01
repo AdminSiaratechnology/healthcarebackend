@@ -1,11 +1,12 @@
 from fastapi import APIRouter,Request,HTTPException, Depends
-from app.schemas.users import Users
+from app.schemas.users import Users, AdminUpdateSchema
 from app.accounts.models.user import UserDoc, UserRole
 from app.utils.audit import log_audit
-from app.encryption.encryption import encrypt_value,decrypt_value,encrypt_value_deterministic
+from app.encryption.encryption import encrypt_value,decrypt_value,encrypt_value_deterministic, init_encryption
 from app.auth.password import hash_password
 from app.auth.deps import get_current_user_id
 from app.accounts.models.admin import Admin
+from datetime import datetime, timezone
 
 from beanie import PydanticObjectId
 from app.schemas.admin import (
@@ -298,4 +299,144 @@ async def get_users(request: Request):
     decrypted_users = [u.decrypt_fields(client_encryption) for u in users]
 
     return {"data": decrypted_users}
+
+
+@router.get("/getall-admin")
+async def get_all_admins(
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    try:
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+
+        current_user = await UserDoc.get(current_user_id)
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        current_role = decrypt_value(ce, current_user.role) if current_user.role else None
+        if current_role != UserRole.SUPER_ADMIN.value:
+            raise HTTPException(
+                status_code=403,
+                detail="Only super_admin can access admin details",
+            )
+
+        admin_docs = await Admin.find().sort("-created_at").to_list()
+
+        result = []
+        for admin_doc in admin_docs:
+            linked_user = None
+            if admin_doc.user_id:
+                try:
+                    linked_user = await UserDoc.get(PydanticObjectId(admin_doc.user_id))
+                except Exception:
+                    linked_user = None
+
+            result.append(
+                {
+                    "admin_id": str(admin_doc.id),
+                    "user_id": str(linked_user.id) if linked_user else str(admin_doc.user_id),
+                    "full_name": decrypt_value(ce, linked_user.full_name) if linked_user and linked_user.full_name else None,
+                    "email": decrypt_value(ce, linked_user.email) if linked_user and linked_user.email else None,
+                    "phone": decrypt_value(ce, linked_user.phone) if linked_user and linked_user.phone else None,
+                    "role": decrypt_value(ce, linked_user.role) if linked_user and linked_user.role else None,
+                    "is_active": linked_user.is_active if linked_user else None,
+                }
+            )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/update-admin/{admin_id}")
+async def update_admin_by_super_admin(
+    admin_id: str,
+    payload: AdminUpdateSchema,
+    request: Request,
+    current_user_id: str = Depends(get_current_user_id),
+):
+    try:
+        ce = getattr(request.app, "client_encryption", None)
+        if ce is None:
+            ce = init_encryption()
+            request.app.client_encryption = ce
+
+        dek_id = getattr(request.app, "dek_id", None)
+        if dek_id is None:
+            raise HTTPException(status_code=500, detail="Encryption key is not initialized")
+
+        current_user = await UserDoc.get(current_user_id)
+        if not current_user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        current_role = decrypt_value(ce, current_user.role) if current_user.role else None
+        if current_role != UserRole.SUPER_ADMIN.value:
+            raise HTTPException(
+                status_code=403,
+                detail="Only super_admin can update admin details",
+            )
+
+        try:
+            admin_obj_id = PydanticObjectId(admin_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid admin_id")
+
+        admin_doc = await Admin.get(admin_obj_id)
+        if not admin_doc:
+            raise HTTPException(status_code=404, detail="Admin record not found")
+
+        if not admin_doc.user_id:
+            raise HTTPException(status_code=404, detail="Linked user not found")
+
+        try:
+            linked_user = await UserDoc.get(PydanticObjectId(admin_doc.user_id))
+        except Exception:
+            linked_user = None
+
+        if not linked_user:
+            raise HTTPException(status_code=404, detail="Linked user not found")
+
+        if payload.email is not None:
+            encrypted_email = encrypt_value_deterministic(ce, dek_id, payload.email)
+            existing_email_user = await UserDoc.find_one({"email": encrypted_email})
+            if existing_email_user and str(existing_email_user.id) != str(linked_user.id):
+                raise HTTPException(status_code=400, detail="Email already exists")
+            linked_user.email = encrypted_email
+            linked_user.email_search = payload.email.lower().strip()
+
+        if payload.phone is not None:
+            linked_user.phone = encrypt_value_deterministic(ce, dek_id, payload.phone)
+            linked_user.phone_search = payload.phone.strip()
+
+        if payload.full_name is not None:
+            linked_user.full_name = encrypt_value(ce, dek_id, payload.full_name)
+            linked_user.full_name_search = payload.full_name.lower().strip()
+
+        
+
+        if payload.is_active is not None:
+            linked_user.is_active = payload.is_active
+
+        linked_user.updated_at = datetime.now(timezone.utc)
+        await linked_user.save()
+
+        
+
+        return {
+            "success": True,
+            "admin_id": str(admin_doc.id),
+            "user_id": str(linked_user.id),
+            "message": "Admin updated successfully",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 

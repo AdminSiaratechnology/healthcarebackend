@@ -100,8 +100,8 @@ async def create_subcategory(
             }
         )
 
-        if not payload.fields:
-            raise HTTPException(status_code=400, detail="Fields are required")
+        # if not payload.fields:
+        #     raise HTTPException(status_code=400, detail="Fields are required")
 
         # 8️⃣ Save
         subcategory = SubcategoryDoc(
@@ -110,7 +110,7 @@ async def create_subcategory(
             # description=encrypted["description"],
             # content=encrypted["content"],
             # fields=[field.dict() for field in payload.fields], 
-            field=payload.field.model_dump(exclude_none=True) if payload.field else None,
+            # field=payload.field.model_dump(exclude_none=True) if payload.field else None,
             name_search=normalized_subcategory_name,        # 🔎 search
             created_by=user,
             status="active",

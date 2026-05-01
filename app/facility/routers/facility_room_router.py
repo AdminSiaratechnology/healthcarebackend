@@ -406,11 +406,158 @@ async def get_facility_rooms(
 
 
 
+# @router.put("/update/{room_id}/")
+# async def update_facility_room(
+#     room_id: str,
+#     payload: FacilityRoom,
+#     request: Request,
+#     facility_id: Optional[str] = Query(None),
+#     current_user_id: str = Depends(get_current_user_id),
+# ):
+#     try:
+#         # 1️⃣ User
+#         user = await UserDoc.get(current_user_id)
+#         if not user:
+#             raise HTTPException(status_code=404, detail="User not found")
+
+#         # 2️⃣ Encryption init
+#         ce = getattr(request.app, "client_encryption", None)
+#         if ce is None:
+#             ce = init_encryption()
+#             request.app.client_encryption = ce
+
+#         dek_id = getattr(request.app, "dek_id", None)
+#         if dek_id is None:
+#             dek_id = ensure_data_key()
+#             request.app.dek_id = dek_id
+
+#         # 3️⃣ Get Room
+#         try:
+#             room_obj_id = ObjectId(room_id)
+#         except Exception:
+#             raise HTTPException(status_code=400, detail="Invalid Room ID")
+
+#         room = await FacilityRooms.find_one(
+#             FacilityRooms.id == room_obj_id,
+#             FacilityRooms.created_by.id == user.id,
+#             FacilityRooms.is_deleted == False,
+#             fetch_links=True
+#         )
+
+#         if not room:
+#             raise HTTPException(status_code=404, detail="Room not found")
+        
+
+        
+
+#         # 4️⃣ Validate floor (optional)
+#         if payload.floor_id:
+#             try:
+#                 floor_obj_id = ObjectId(payload.floor_id)
+#             except Exception:
+#                 raise HTTPException(status_code=400, detail="Invalid Floor ID")
+
+#             floor = await FacilityFloor.find_one(
+#                 FacilityFloor.id == floor_obj_id,
+#                 FacilityFloor.facility_id.id == room.facility_id.id,
+#                 FacilityFloor.is_deleted == False,
+#             )
+
+#             if not floor:
+#                 raise HTTPException(
+#                     status_code=404,
+#                     detail="Floor not found in this facility"
+#                 )
+
+#             room.floor_id = floor
+
+#         # 5️⃣ Normalize & check duplicate room number
+#         if payload.room_id:
+#             normalized_room_no = payload.room_id.strip().lower()
+
+#             duplicate = await FacilityRooms.find_one(
+#                 FacilityRooms.facility_id.id == room.facility_id.id,
+#                 FacilityRooms.room_no_search == normalized_room_no,
+#                 FacilityRooms.id != room.id,
+#                 FacilityRooms.is_deleted == False,
+#             )
+#             if duplicate:
+#                 raise HTTPException(
+#                     status_code=400,
+#                     detail="Room number already exists in this facility"
+#                 )
+
+#             room.room_no_search = normalized_room_no
+#             room.room_number = encrypt_value(
+#                 ce, dek_id, payload.room_id
+#             )
+
+#         # 6️⃣ Update encrypted fields (ONLY if provided)
+#         if payload.room_type:
+#             room.room_type_search = payload.room_type.strip().lower()
+#             room.room_type = encrypt_value(ce, dek_id, payload.room_type)
+
+#         if payload.wing is not None:
+#             room.wing = encrypt_value(ce, dek_id, payload.wing)
+
+#         if payload.isolation_room is not None:
+#             room.isolation_room = encrypt_value(
+#                 ce, dek_id, payload.isolation_room
+#             )
+
+#         if payload.notes is not None:
+#             room.notes = encrypt_value(ce, dek_id, payload.notes)
+
+#         if payload.features:
+#             room.room_features = encrypt_value(
+#                 ce,
+#                 dek_id,
+#                 json.dumps(payload.features.model_dump())
+#             )
+
+#         # 7️⃣ Timestamp
+#         room.updated_at = datetime.now(timezone.utc)
+
+#         await room.save()
+
+#         # 8️⃣ Audit
+#         try:
+#             await log_audit(
+#                 request=request,
+#                 user_id=str(user.id),
+#                 action="Update",
+#                 resource="Facility Room",
+#                 resource_id=str(room.id),
+#                 status="success",
+#                 notes="Facility room updated successfully",
+#             )
+#         except Exception:
+#             pass
+
+#         return {
+#             "success": True,
+#             "room_id": str(room.id),
+#             "message": "Facility room updated successfully",
+#         }
+
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         print("❌ Crash:", e)
+#         raise HTTPException(
+#             status_code=500,
+#             detail="Internal Server Error while updating facility room"
+#         )
+
+
+
+
 @router.put("/update/{room_id}/")
 async def update_facility_room(
     room_id: str,
     payload: FacilityRoom,
     request: Request,
+    facility_id: Optional[str] = Query(None),
     current_user_id: str = Depends(get_current_user_id),
 ):
     try:
@@ -446,7 +593,38 @@ async def update_facility_room(
         if not room:
             raise HTTPException(status_code=404, detail="Room not found")
 
-        # 4️⃣ Validate floor (optional)
+        # 4️⃣ Handle facility change
+        new_facility_id_obj = room.facility_id.id
+        new_facility_doc = room.facility_id
+        facility_changed = False
+
+        if facility_id:
+            try:
+                target_facility_obj_id = ObjectId(facility_id)
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid Facility ID")
+
+            target_facility = await Facility.find_one(
+                Facility.id == target_facility_obj_id,
+                Facility.created_by.id == user.id
+            )
+
+            if not target_facility:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Target Facility not found or access denied"
+                )
+
+            if str(room.facility_id.id) != facility_id:
+                new_facility_id_obj = target_facility.id
+                new_facility_doc = target_facility
+                facility_changed = True
+
+        # ⚠️ Reset floor if facility changed
+        if facility_changed:
+            room.floor_id = None
+
+        # 5️⃣ Validate floor (optional)
         if payload.floor_id:
             try:
                 floor_obj_id = ObjectId(payload.floor_id)
@@ -455,7 +633,7 @@ async def update_facility_room(
 
             floor = await FacilityFloor.find_one(
                 FacilityFloor.id == floor_obj_id,
-                FacilityFloor.facility_id.id == room.facility_id.id,
+                FacilityFloor.facility_id.id == new_facility_id_obj,
                 FacilityFloor.is_deleted == False,
             )
 
@@ -467,28 +645,33 @@ async def update_facility_room(
 
             room.floor_id = floor
 
-        # 5️⃣ Normalize & check duplicate room number
+        # 6️⃣ Room number + duplicate check
         if payload.room_id:
             normalized_room_no = payload.room_id.strip().lower()
 
-            duplicate = await FacilityRooms.find_one(
-                FacilityRooms.facility_id.id == room.facility_id.id,
-                FacilityRooms.room_no_search == normalized_room_no,
-                FacilityRooms.id != room.id,
-                FacilityRooms.is_deleted == False,
-            )
-            if duplicate:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Room number already exists in this facility"
+            if (
+                facility_changed
+                or normalized_room_no != room.room_no_search
+            ):
+                duplicate = await FacilityRooms.find_one(
+                    FacilityRooms.facility_id.id == new_facility_id_obj,
+                    FacilityRooms.room_no_search == normalized_room_no,
+                    FacilityRooms.id != room.id,
+                    FacilityRooms.is_deleted == False,
                 )
+
+                if duplicate:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Room number already exists in this facility"
+                    )
 
             room.room_no_search = normalized_room_no
             room.room_number = encrypt_value(
                 ce, dek_id, payload.room_id
             )
 
-        # 6️⃣ Update encrypted fields (ONLY if provided)
+        # 7️⃣ Other fields update
         if payload.room_type:
             room.room_type_search = payload.room_type.strip().lower()
             room.room_type = encrypt_value(ce, dek_id, payload.room_type)
@@ -511,12 +694,15 @@ async def update_facility_room(
                 json.dumps(payload.features.model_dump())
             )
 
-        # 7️⃣ Timestamp
+        # 🔁 Apply facility update
+        room.facility_id = new_facility_doc
+
+        # 8️⃣ Timestamp
         room.updated_at = datetime.now(timezone.utc)
 
         await room.save()
 
-        # 8️⃣ Audit
+        # 9️⃣ Audit
         try:
             await log_audit(
                 request=request,
@@ -540,8 +726,21 @@ async def update_facility_room(
         raise
     except Exception as e:
         print("❌ Crash:", e)
+
+        try:
+            await log_audit(
+                request=request,
+                user_id=str(current_user_id),
+                action="Update",
+                resource="Facility Room",
+                resource_id=str(room_id),
+                status="failed",
+                notes=str(e),
+            )
+        except Exception:
+            pass
+
         raise HTTPException(
             status_code=500,
             detail="Internal Server Error while updating facility room"
         )
-
