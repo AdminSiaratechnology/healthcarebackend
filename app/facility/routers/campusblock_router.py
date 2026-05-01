@@ -263,7 +263,7 @@ async def update_campus_block(
         dek_id = getattr(request.app, "dek_id", None) or ensure_data_key()
         request.app.dek_id = dek_id
 
-        # 3️⃣ Validate ID
+        # 3️⃣ Validate IDs (path params only)
         try:
             block_obj_id = PydanticObjectId(block_id)
             facility_obj_id = PydanticObjectId(facility_id)
@@ -271,33 +271,38 @@ async def update_campus_block(
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid Campus Block ID")
         
-        # ✅ ADD THIS BLOCK
-        facility = await Facility.get(facility_obj_id)
+        # 5️⃣ Validate target facility (must belong to current user)
+        facility = await Facility.find_one(
+            Facility.id == facility_obj_id,
+            Facility.created_by.id == user.id
+        )
         if not facility:
             raise HTTPException(status_code=404, detail="Facility not found")
-        
 
-        # 4️⃣ Fetch block (Beanie-correct)
+        # 6️⃣ Fetch block by block_id (independent from target facility_id)
         campus_block = await CampusBlock.find_one(
             CampusBlock.id == block_obj_id,
             CampusBlock.created_by.id == user.id,
-            CampusBlock.facility_id.id == facility_obj_id,
             CampusBlock.is_deleted == False,
         )
 
         if not campus_block:
-            raise HTTPException(status_code=404, detail="Campus block not found in this facility")
-        
-               
+            raise HTTPException(status_code=404, detail="Campus block not found")
 
-        # 5️⃣ Normalize name
+        # 7️⃣ Normalize name
         normalized_block_name = payload.block_name.strip().lower()
 
-        # 6️⃣ Duplicate validation
-        if normalized_block_name != campus_block.block_name_search:
+        # 8️⃣ Duplicate validation in target facility
+        current_facility_id = getattr(campus_block.facility_id, "id", None)
+        should_check_duplicate = (
+            normalized_block_name != campus_block.block_name_search
+            or current_facility_id != facility_obj_id
+        )
+
+        if should_check_duplicate:
             duplicate = await CampusBlock.find_one(
                 And(
-                    CampusBlock.facility_id == campus_block.facility_id,
+                    CampusBlock.facility_id.id == facility_obj_id,
                     CampusBlock.block_name_search == normalized_block_name,
                     CampusBlock.is_deleted == False,
                     CampusBlock.id != campus_block.id,
@@ -310,7 +315,7 @@ async def update_campus_block(
                     detail="Campus block with this name already exists in this facility",
                 )
 
-        # 7️⃣ Encrypt & update
+        # 9️⃣ Encrypt & update
         encrypted = encrypt_dict(
             ce,
             dek_id,

@@ -20,6 +20,7 @@ from app.utils.audit import log_audit
 import json
 import os
 import uuid
+import re
 
 
 
@@ -186,24 +187,16 @@ async def get_facilities(
             request.app.client_encryption = ce
 
         # ----------------------------
-        # 3️⃣ Base query (user scope)
+        # 3️⃣ Build filters (user scope)
         # ----------------------------
-        base_query = {
-            "created_by.$id": ObjectId(user.id)
-        }
-
-        # ----------------------------
-        # 4️⃣ Build filtered query
-        # ----------------------------
-        query = base_query.copy()
+        filters = [Facility.created_by.id == user.id]
 
         if status:
-            query["status"] = status.lower()
+            filters.append(Facility.status == status.lower())
 
         if search:
-            query["facility_name_search"] = {
-                "$regex": f"^{search.lower()}"
-            }
+            search_pattern = re.compile(f"^{re.escape(search.strip())}", re.IGNORECASE)
+            filters.append(Facility.facility_name_search == search_pattern)
 
 
         # ----------------------------
@@ -212,7 +205,7 @@ async def get_facilities(
         skip = (page - 1) * page_size
 
         facilities = (
-            await Facility.find(query)
+            await Facility.find(*filters)
             .sort("-created_at")
             .skip(skip)
             .limit(page_size)
@@ -222,12 +215,15 @@ async def get_facilities(
         # ----------------------------
         # 6️⃣ Counts (NO filters)
         # ----------------------------
-        total_facilities = await Facility.find(base_query).count()
+        total_filtered = await Facility.find(*filters).count()
+        total_facilities = await Facility.find(Facility.created_by.id == user.id).count()
         total_active = await Facility.find(
-            {**base_query, "status": "active"}
+            Facility.created_by.id == user.id,
+            Facility.status == "active"
         ).count()
         total_inactive = await Facility.find(
-            {**base_query, "status": "inactive"}
+            Facility.created_by.id == user.id,
+            Facility.status == "inactive"
         ).count()
 
         # ----------------------------
@@ -246,8 +242,6 @@ async def get_facilities(
                 "updated_at": f.updated_at
             })
         
-        total = len(result)
-
         # ----------------------------
         # 8️⃣ Final response
         # ----------------------------
@@ -255,13 +249,15 @@ async def get_facilities(
             "page": page,
             "page_size": page_size,
             "count": len(result),
-            "total_pages": ((total + page_size - 1) // page_size),
+            "total_pages": ((total_filtered + page_size - 1) // page_size),
             "total_facilities": total_facilities,
             "total_active": total_active,
             "total_inactive": total_inactive,
             "data": result,
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
